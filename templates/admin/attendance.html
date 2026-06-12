@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Upload Attendance</h2>
+  <p>
+    Upload the weekly attendance export (<strong>.txt</strong> or
+    <strong>.xlsx</strong>). The file must include a
+    <strong>Student Name</strong> column and <strong>Period 0</strong> through
+    <strong>Period 7</strong> columns.
+  </p>
+
+  {% if request.query_params.get('success') %}
+  <p class="status-note success">
+    Upload complete —
+    {{ request.query_params.get('records', '0') }} absence records saved for
+    {{ request.query_params.get('students', '0') }} student(s).
+  </p>
+  {% endif %}
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+
+  <form class="upload-form" action="/admin/attendance/upload" method="post" enctype="multipart/form-data">
+    <label for="file">Attendance Excel file</label>
+    <input id="file" name="file" type="file" accept=".txt,.tsv,.csv,.xlsx,.xlsm,.xls" required>
+    <button type="submit">Upload and import</button>
+  </form>
+
+  <p class="help-text">
+    Password protection arrives in Phase 4. For testing, use
+    <code>uv run python scripts/build_test_fixture.py</code> to create a named
+    sample file from <code>cleanatt.xlsx</code>.
+  </p>
+</section>
+
+<section class="card">
+  <h2>Database summary</h2>
+  <ul>
+    <li><strong>{{ student_count }}</strong> students</li>
+    <li><strong>{{ record_count }}</strong> attendance records</li>
+  </ul>
+</section>
+
+{% if uploads %}
+<section class="card">
+  <h2>Recent uploads</h2>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Filename</th>
+        <th>Uploaded</th>
+        <th>Source rows</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for upload in uploads %}
+      <tr>
+        <td>{{ upload.id }}</td>
+        <td>{{ upload.filename }}</td>
+        <td>{{ upload.uploaded_at }}</td>
+        <td>{{ upload.row_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<p><a href="/">← Back to home</a></p>
+{% endblock %}

@@ -1,4 +1,23 @@
-# Spreadsheet files
+# Attendance exports contain student PII — keep local only (FERPA)
 *.xlsx
 *.xlsm
 *.xls
+*.txt
+*.tsv
+*.csv
+
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment and runtime data
+.env
+data/*
+!data/.gitkeep
+
+# uv lockfile (optional to commit; omit for now so teacher runs uv sync locally)
+uv.lock

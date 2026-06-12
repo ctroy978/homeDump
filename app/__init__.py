@@ -1,0 +1,1 @@
+"""Classroom homework makeup application."""
