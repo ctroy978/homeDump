@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hmac
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from starlette.background import BackgroundTask
 
 from app.config import settings
 from app.database import get_db
@@ -22,6 +24,12 @@ from app.dependencies import (
 from app.services.assignments import create_assignment, delete_assignment, list_assignments
 from app.services.attendance_parser import SUPPORTED_EXTENSIONS, ingest_attendance_file
 from app.services.claim_logs import ClaimLogStatus, list_claim_logs
+from app.services.data_backup import (
+    BackupError,
+    backup_archive_name,
+    data_dir_has_backup_content,
+    write_data_backup,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(settings.project_root / "templates"))
@@ -140,6 +148,39 @@ def admin_dashboard(
             "public_base_url_set": bool(settings.public_base_url),
             **_admin_summary(db),
         },
+    )
+
+
+def _remove_temp_file(path: Path) -> None:
+    path.unlink(missing_ok=True)
+
+
+@router.get("/backup/download")
+def download_backup(
+    _admin: None = Depends(require_admin),
+) -> FileResponse | RedirectResponse:
+    """Build a classroom data archive and send it to the teacher's browser."""
+    if not data_dir_has_backup_content(settings.data_dir):
+        return RedirectResponse(url="/admin?backup_error=empty", status_code=303)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".tar.gz")
+    tmp_path = Path(tmp.name)
+    tmp.close()
+
+    try:
+        write_data_backup(settings.data_dir, tmp_path)
+    except BackupError:
+        _remove_temp_file(tmp_path)
+        return RedirectResponse(url="/admin?backup_error=empty", status_code=303)
+    except OSError:
+        _remove_temp_file(tmp_path)
+        return RedirectResponse(url="/admin?backup_error=failed", status_code=303)
+
+    return FileResponse(
+        path=tmp_path,
+        filename=backup_archive_name(),
+        media_type="application/gzip",
+        background=BackgroundTask(_remove_temp_file, tmp_path),
     )
 
 

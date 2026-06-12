@@ -12,8 +12,11 @@ from app.database import init_schema
 from app.services.data_backup import (
     BACKUP_PREFIX,
     BackupError,
+    backup_archive_name,
     create_data_backup,
+    data_dir_has_backup_content,
     restore_data_backup,
+    write_data_backup,
 )
 
 
@@ -77,6 +80,26 @@ def test_restore_moves_existing_data_aside(tmp_path: Path) -> None:
     assert summary.previous_data_path.exists()
     assert (summary.previous_data_path / "marker.txt").read_text() == "changed"
     assert (data_dir / "marker.txt").read_text() == "old"
+
+
+def test_write_data_backup_rejects_empty_directory(tmp_path: Path) -> None:
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
+    archive = tmp_path / "empty.tar.gz"
+
+    with pytest.raises(BackupError, match="empty"):
+        write_data_backup(empty_dir, archive)
+
+
+def test_data_dir_has_backup_content(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    assert not data_dir_has_backup_content(data_dir)
+    _seed_data_dir(data_dir)
+    assert data_dir_has_backup_content(data_dir)
+
+
+def test_backup_archive_name_uses_standard_prefix() -> None:
+    assert backup_archive_name().startswith(f"{BACKUP_PREFIX}-")
 
 
 def test_restore_rejects_invalid_archive(tmp_path: Path) -> None:

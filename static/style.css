@@ -336,6 +336,10 @@ main {
   white-space: pre-wrap;
 }
 
+.backup-restore-note {
+  margin-top: 1rem;
+}
+
 .muted-field .help-text {
   margin: 0;
 }

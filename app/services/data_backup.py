@@ -67,17 +67,27 @@ def _archive_has_data_members(tar: tarfile.TarFile) -> bool:
     return False
 
 
-def create_data_backup(data_dir: Path, destination_dir: Path) -> BackupSummary:
-    """
-    Compress the ``data/`` directory into a timestamped .tar.gz archive.
+def backup_archive_name() -> str:
+    """Return the standard timestamped filename for a backup download."""
+    return f"{BACKUP_PREFIX}-{_timestamp()}.tar.gz"
 
-    The archive is suitable for copying to a USB drive. Only classroom data is
-    included — not the application code or ``.env`` secrets.
-    """
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = destination_dir / f"{BACKUP_PREFIX}-{_timestamp()}.tar.gz"
 
+def data_dir_has_backup_content(data_dir: Path) -> bool:
+    """Return whether the data directory contains files worth archiving."""
+    return bool(_iter_data_files(data_dir))
+
+
+def write_data_backup(data_dir: Path, archive_path: Path) -> BackupSummary:
+    """
+    Write a compressed backup archive to ``archive_path``.
+
+    Only classroom data is included — not application code or ``.env`` secrets.
+    """
     files = _iter_data_files(data_dir)
+    if not files:
+        raise BackupError("Nothing to back up — the data directory is empty.")
+
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
     byte_count = sum(path.stat().st_size for path in files)
     manifest = {
         "format_version": 1,
@@ -102,6 +112,17 @@ def create_data_backup(data_dir: Path, destination_dir: Path) -> BackupSummary:
         file_count=len(files),
         byte_count=byte_count,
     )
+
+
+def create_data_backup(data_dir: Path, destination_dir: Path) -> BackupSummary:
+    """
+    Compress the ``data/`` directory into a timestamped .tar.gz archive.
+
+    The archive is suitable for copying to a USB drive.
+    """
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    archive_path = destination_dir / backup_archive_name()
+    return write_data_backup(data_dir, archive_path)
 
 
 def restore_data_backup(

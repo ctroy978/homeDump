@@ -8,7 +8,11 @@ import sys
 from pathlib import Path
 
 from app.config import settings
-from app.services.data_backup import BackupError, create_data_backup
+from app.services.data_backup import (
+    BackupError,
+    create_data_backup,
+    data_dir_has_backup_content,
+)
 
 
 def _format_size(byte_count: int) -> str:
@@ -31,7 +35,7 @@ def main() -> int:
     args = parser.parse_args()
 
     data_dir = settings.data_dir
-    if not data_dir.exists() or not any(data_dir.iterdir()):
+    if not data_dir_has_backup_content(data_dir):
         print(
             "Nothing to back up yet — the data directory is empty.",
             file=sys.stderr,

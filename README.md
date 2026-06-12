@@ -296,7 +296,10 @@ Run `uv run python scripts/build_test_fixture.py` to build a named test fixture 
    student claim attempts appear with success/failure status. Filter by student
    name or result. Successful codes link to `/verify/{token}`.
 
-2. **Backup to USB** — mount your drive, then:
+2. **Download backup** — on the admin dashboard, click **Download backup**
+   and save the `.tar.gz` file on your computer or cloud storage.
+
+3. **Backup to USB** — or mount your drive and run:
 
    ```bash
    uv run python scripts/backup_data.py /run/media/$USER/YOUR-USB-NAME
@@ -305,7 +308,7 @@ Run `uv run python scripts/build_test_fixture.py` to build a named test fixture 
    The script writes `homedump-data-YYYYMMDD-HHMMSS.tar.gz` to the drive.
    Typical classroom data is small (database + PDFs) — a USB stick is plenty.
 
-3. **Restore from USB** — stop the server first, then:
+4. **Restore** — stop the server first, then run (with your saved file):
 
    ```bash
    uv run python scripts/restore_data.py /path/to/homedump-data-....tar.gz --yes
@@ -314,7 +317,7 @@ Run `uv run python scripts/build_test_fixture.py` to build a named test fixture 
 
    Your previous `data/` folder is moved to `data.before-restore-...` automatically.
 
-4. **Run automated tests:**
+5. **Run automated tests:**
 
    ```bash
    uv run pytest tests/test_claim_logs.py tests/test_data_backup.py -v

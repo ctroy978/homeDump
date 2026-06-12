@@ -65,19 +65,34 @@
 
 <section class="card">
   <h2>Backup and restore</h2>
+  {% if request.query_params.get('backup_error') == 'empty' %}
+  <p class="status-note error">Nothing to back up yet — upload attendance or add assignments first.</p>
+  {% elif request.query_params.get('backup_error') == 'failed' %}
+  <p class="status-note error">Backup failed. Try again or use the command-line script below.</p>
+  {% endif %}
+
   <p>
-    Back up the classroom data folder to a USB drive. Archives contain the
-    database, attendance uploads, assignment PDFs, and claimed homework — not
-    your <code>.env</code> password.
+    Download a compressed backup of classroom data to save on your computer,
+    USB drive, or cloud storage. The file is a <code>.tar.gz</code> archive
+    (similar to a zip file) containing your database, attendance uploads,
+    assignment PDFs, and claimed homework.
   </p>
   <p class="help-text">
-    Stop the server before restoring. Restore moves your current <code>data/</code>
-    folder aside automatically, then unpacks the backup.
+    Does not include your <code>.env</code> admin password — keep that
+    somewhere safe separately.
   </p>
-  <pre class="command-block"><code># Backup to a USB drive (change the path to your drive)
-uv run python scripts/backup_data.py /run/media/$USER/USB
 
-# Restore from a backup archive
-uv run python scripts/restore_data.py /run/media/$USER/USB/homedump-data-YYYYMMDD-HHMMSS.tar.gz --yes</code></pre>
+  <a class="download-button" href="/admin/backup/download">Download backup</a>
+
+  <p class="help-text backup-restore-note">
+    To restore later, stop the server and run the restore script on the
+    classroom computer with your saved file:
+  </p>
+  <pre class="command-block"><code>uv run python scripts/restore_data.py /path/to/homedump-data-YYYYMMDD-HHMMSS.tar.gz --yes
+uv run main</code></pre>
+  <p class="help-text">
+    You can also write backups directly to a USB drive:
+    <code>uv run python scripts/backup_data.py /run/media/$USER/USB</code>
+  </p>
 </section>
 {% endblock %}
