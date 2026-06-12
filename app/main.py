@@ -5,14 +5,15 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
-from app.database import init_schema, list_tables
-from app.routers import admin, dev
+from app.database import get_db, init_schema, list_tables
+from app.routers import admin, dev, student
+from app.services.student_lookup import list_periods_with_assignments
 
 TEMPLATES_DIR = settings.project_root / "templates"
 STATIC_DIR = settings.project_root / "static"
@@ -39,6 +40,7 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 app.include_router(admin.router)
+app.include_router(student.router)
 app.include_router(dev.router)
 
 
@@ -65,10 +67,13 @@ def health_check() -> dict[str, str | list[str]]:
 
 
 @app.get("/", response_class=HTMLResponse)
-def home(request: Request) -> HTMLResponse:
+def home(request: Request, db=Depends(get_db)) -> HTMLResponse:
     """Landing page shown to students and teachers."""
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"title": "Homework Makeup"},
+        context={
+            "title": "Homework Makeup",
+            "periods": list_periods_with_assignments(db),
+        },
     )

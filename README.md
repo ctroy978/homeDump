@@ -25,6 +25,27 @@ Open in a browser:
 
 On the classroom network, students use `http://<server-ip>:8000` instead of `localhost`.
 
+## Attendance import model
+
+Exports are year-to-date, but you download them **one class at a time**. Imports
+are **per student**, not per class:
+
+1. The app finds every student in the file (by **SIS number** when the export
+   includes it, otherwise by name).
+2. For each student, it **deletes all of their attendance** and reloads
+   year-to-date rows from that file.
+3. Students who are not in the file are left unchanged.
+
+This lets you upload Period 3, then Period 5, without wiping other classes.
+Re-upload whenever late excused notes arrive.
+
+**Schedule changes (Period 3 → Period 5):** once a student moves, they disappear
+from the Period 3 export and show up in Period 5. Upload the **Period 5** report
+to refresh them — the year-to-date export should include their full history,
+including older Period 3 absences with any updated codes. Their old snapshot
+stays put until they appear in a new upload, so always refresh from the class
+export that currently contains them.
+
 ## Verify Phase 2 (attendance upload)
 
 1. **Build a test fixture** from the anonymized sample (adds a fake student name):
@@ -68,6 +89,36 @@ On the classroom network, students use `http://<server-ip>:8000` instead of `loc
    ```
 
    Expected: one row — `2025-09-02|3|Unexcused Absence`
+
+## Verify Phase 5 (student form)
+
+1. **Prerequisites** — attendance uploaded (Phase 2) and at least one assignment
+   added (Phase 4) for a period/date where a test student has an allowable absence.
+
+2. **Start the server:**
+
+   ```bash
+   uv run main
+   ```
+
+3. **Open the home page** at `http://localhost:8000/`
+
+4. **Walk through the cascading dropdowns:**
+   - **Period** — only periods with uploaded assignments appear
+   - **Name** — students with an allowable absence on a date that has homework
+   - **Date** — eligible absence dates for that student and period
+   - **Homework** — matching assignments (download comes in Phase 6)
+
+5. **Run automated tests:**
+
+   ```bash
+   uv run pytest tests/test_student_lookup.py -v
+   ```
+
+6. **HTMX partials** — each dropdown loads via:
+   - `/student/names?period=N`
+   - `/student/dates?period=N&student=...`
+   - `/student/assignments?period=N&student=...&date=YYYY-MM-DD`
 
 ## Verify Phase 4 (admin + assignments)
 
@@ -170,11 +221,11 @@ Copy `.env.example` to `.env` and edit as needed:
 | 2 | **Done** | Attendance Excel upload and parsing |
 | 3 | **Done** | Eligibility engine and tests |
 | 4 | **Done** | Password-protected admin and assignment uploads |
-| 5 | **Current** | Student form with HTMX dropdowns |
-| 6 | Planned | Claim flow, QR codes, PDF watermarking |
+| 5 | **Done** | Student form with HTMX dropdowns |
+| 6 | **Current** | Claim flow, QR codes, PDF watermarking |
 | 7 | Planned | Claim logs, backup script, deployment polish |
 
-**Current focus: Phase 5** — student-facing form with cascading dropdowns (Period → Name → Date → eligible assignments).
+**Current focus: Phase 6** — claim flow with unique codes, QR codes, and watermarked PDF downloads.
 
 After testing each phase, say **"build Phase N"** to continue.
 

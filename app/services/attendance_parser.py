@@ -22,6 +22,16 @@ PERIOD_HEADER_RE = re.compile(r"^Period\s*(\d)$", re.IGNORECASE)
 EXCEL_EPOCH = datetime(1899, 12, 30)
 
 
+@dataclass(frozen=True)
+class StudentRosterEntry:
+    """One student found in an attendance export."""
+
+    key: str
+    name: str
+    grade: str | None
+    sis_number: str | None = None
+
+
 @dataclass
 class AttendanceParseResult:
     """Summary returned after ingesting an attendance workbook."""
@@ -30,6 +40,7 @@ class AttendanceParseResult:
     filename: str
     rows_read: int = 0
     records_upserted: int = 0
+    records_cleared: int = 0
     students_touched: int = 0
     rows_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -172,6 +183,7 @@ def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], in
     date_col = _require_column(columns, "Date")
     note_col = _optional_column(columns, "Note")
     grade_col = _optional_column(columns, "Grade")
+    sis_col = _optional_column(columns, "Sis Number")
 
     name_col = None
     if "student name" in [c.lower() for c in columns]:
@@ -194,6 +206,8 @@ def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], in
 
         grade = _normalize_grade(row.get(grade_col)) if grade_col else None
         note = _normalize_code(row.get(note_col)) if note_col else None
+        sis_number = _normalize_code(row.get(sis_col)) if sis_col else None
+        student_key = sis_number or student_name
 
         row_had_code = False
         for column, period in period_columns.items():
@@ -203,7 +217,9 @@ def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], in
             row_had_code = True
             parsed_rows.append(
                 {
+                    "student_key": student_key,
                     "student_name": student_name,
+                    "sis_number": sis_number,
                     "grade": grade,
                     "absence_date": absence_date,
                     "period": period,
@@ -218,21 +234,191 @@ def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], in
     return parsed_rows, rows_skipped
 
 
-def upsert_student(conn: sqlite3.Connection, name: str, grade: str | None) -> int:
+def student_identity_key(name: str, sis_number: str | None) -> str:
+    """Stable per-student key; SIS number wins when the export includes it."""
+    return sis_number or name
+
+
+def extract_students_from_dataframe(df: pd.DataFrame) -> dict[str, StudentRosterEntry]:
+    """
+    Return every student appearing in the export.
+
+    Each student is keyed by SIS number when present, otherwise by name. This
+    keeps schedule changes tied to the person, not the class roster upload.
+    """
+    columns = list(df.columns)
+    name_col = _require_column(columns, "Student Name")
+    grade_col = _optional_column(columns, "Grade")
+    sis_col = _optional_column(columns, "Sis Number")
+
+    students: dict[str, StudentRosterEntry] = {}
+    for _, row in df.iterrows():
+        name = _normalize_code(row.get(name_col))
+        if not name:
+            continue
+        sis_number = _normalize_code(row.get(sis_col)) if sis_col else None
+        grade = _normalize_grade(row.get(grade_col)) if grade_col else None
+        key = student_identity_key(name, sis_number)
+        existing = students.get(key)
+        if existing is None:
+            students[key] = StudentRosterEntry(
+                key=key,
+                name=name,
+                grade=grade,
+                sis_number=sis_number,
+            )
+        elif grade is not None:
+            students[key] = StudentRosterEntry(
+                key=key,
+                name=name,
+                grade=grade,
+                sis_number=sis_number or existing.sis_number,
+            )
+    return students
+
+
+def upsert_student(
+    conn: sqlite3.Connection,
+    name: str,
+    grade: str | None,
+    sis_number: str | None = None,
+) -> int:
     """Insert or update a student row and return its id."""
-    conn.execute(
-        """
-        INSERT INTO students (name, grade)
-        VALUES (?, ?)
-        ON CONFLICT(name) DO UPDATE SET
-            grade = COALESCE(excluded.grade, students.grade)
-        """,
-        (name, grade),
-    )
-    row = conn.execute("SELECT id FROM students WHERE name = ?", (name,)).fetchone()
+    if sis_number:
+        by_sis = conn.execute(
+            "SELECT id FROM students WHERE sis_number = ?",
+            (sis_number,),
+        ).fetchone()
+        if by_sis is not None:
+            conn.execute(
+                """
+                UPDATE students
+                SET name = ?, grade = COALESCE(?, grade)
+                WHERE id = ?
+                """,
+                (name, grade, by_sis["id"]),
+            )
+            return int(by_sis["id"])
+
+        by_name = conn.execute(
+            "SELECT id, sis_number FROM students WHERE name = ?",
+            (name,),
+        ).fetchone()
+        if by_name is not None and by_name["sis_number"] is None:
+            conn.execute(
+                """
+                UPDATE students
+                SET sis_number = ?, grade = COALESCE(?, grade)
+                WHERE id = ?
+                """,
+                (sis_number, grade, by_name["id"]),
+            )
+            return int(by_name["id"])
+
+        conn.execute(
+            "INSERT INTO students (sis_number, name, grade) VALUES (?, ?, ?)",
+            (sis_number, name, grade),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO students (name, grade)
+            VALUES (?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                grade = COALESCE(excluded.grade, students.grade)
+            """,
+            (name, grade),
+        )
+
+    if sis_number:
+        row = conn.execute(
+            "SELECT id FROM students WHERE sis_number = ?",
+            (sis_number,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM students WHERE name = ?",
+            (name,),
+        ).fetchone()
     if row is None:
         raise RuntimeError(f"Failed to upsert student: {name}")
     return int(row["id"])
+
+
+def _clear_attendance_for_student(conn: sqlite3.Connection, student_id: int) -> int:
+    """Remove all attendance rows for one student before reloading their snapshot."""
+    cursor = conn.execute(
+        "DELETE FROM attendance_records WHERE student_id = ?",
+        (student_id,),
+    )
+    return int(cursor.rowcount)
+
+
+def _records_for_student(
+    parsed_rows: list[dict[str, object]],
+    student_key: str,
+) -> dict[tuple[int, str, int], tuple[object, ...]]:
+    """Collect deduplicated attendance rows for one student; last row wins."""
+    records_by_key: dict[tuple[int, str, int], tuple[object, ...]] = {}
+    for row in parsed_rows:
+        if str(row["student_key"]) != student_key:
+            continue
+        key = (
+            int(row["student_id"]),  # type: ignore[call-overload]
+            str(row["absence_date"]),
+            int(row["period"]),
+        )
+        records_by_key[key] = (
+            row["student_id"],
+            row["absence_date"],
+            row["period"],
+            row["absence_code"],
+            row["note"],
+            row["upload_id"],
+        )
+    return records_by_key
+
+
+def replace_attendance_for_student(
+    conn: sqlite3.Connection,
+    student_id: int,
+    parsed_rows: list[dict[str, object]],
+    student_key: str,
+    upload_id: int,
+) -> tuple[int, int]:
+    """
+    Replace one student's attendance with the rows from the current export.
+
+    Returns ``(records_cleared, records_inserted)``.
+    """
+    for row in parsed_rows:
+        if str(row["student_key"]) == student_key:
+            row["student_id"] = student_id
+            row["upload_id"] = upload_id
+
+    cleared = _clear_attendance_for_student(conn, student_id)
+    records_by_key = _records_for_student(parsed_rows, student_key)
+
+    for values in records_by_key.values():
+        conn.execute(
+            """
+            INSERT INTO attendance_records (
+                student_id, absence_date, period, absence_code, note, upload_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            values,
+        )
+
+    conn.execute(
+        """
+        UPDATE students
+        SET last_attendance_upload_id = ?
+        WHERE id = ?
+        """,
+        (upload_id, student_id),
+    )
+    return cleared, len(records_by_key)
 
 
 def ingest_attendance_file(
@@ -243,8 +429,14 @@ def ingest_attendance_file(
     """
     Parse an attendance workbook and write normalized rows to SQLite.
 
-    Merge strategy: latest upload wins for each (student, date, period) key.
-    Existing records with the same key get their code/note/upload_id updated.
+    Student replace strategy: the file may contain one class roster, but each
+    student is handled independently. When a student appears in an upload,
+    all of their attendance is cleared and reloaded from that file's
+    year-to-date rows. Other students are untouched.
+
+    This supports importing one class at a time and schedule changes: a student
+    who moves from Period 3 to Period 5 is refreshed the next time they appear
+    in the Period 5 export (matched by SIS number when available).
     """
     df = load_attendance_dataframe(source_path)
     parsed_rows, rows_skipped = parse_attendance_rows(df)
@@ -261,42 +453,26 @@ def ingest_attendance_file(
         rows_read=len(df),
     )
 
-    student_ids: dict[str, int] = {}
-    student_grades: dict[str, str | None] = {}
+    roster = extract_students_from_dataframe(df)
 
-    for row in parsed_rows:
-        name = str(row["student_name"])
-        if name not in student_ids:
-            student_grades[name] = row.get("grade")  # type: ignore[assignment]
-            student_ids[name] = upsert_student(
-                conn,
-                name,
-                student_grades[name],  # type: ignore[arg-type]
-            )
-
-        conn.execute(
-            """
-            INSERT INTO attendance_records (
-                student_id, absence_date, period, absence_code, note, upload_id
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(student_id, absence_date, period) DO UPDATE SET
-                absence_code = excluded.absence_code,
-                note = excluded.note,
-                upload_id = excluded.upload_id
-            """,
-            (
-                student_ids[name],
-                row["absence_date"],
-                row["period"],
-                row["absence_code"],
-                row["note"],
-                upload_id,
-            ),
+    for entry in roster.values():
+        student_id = upsert_student(
+            conn,
+            entry.name,
+            entry.grade,
+            entry.sis_number,
         )
-        result.records_upserted += 1
+        cleared, inserted = replace_attendance_for_student(
+            conn,
+            student_id,
+            parsed_rows,
+            entry.key,
+            upload_id,
+        )
+        result.records_cleared += cleared
+        result.records_upserted += inserted
 
-    result.students_touched = len(student_ids)
+    result.students_touched = len(roster)
     result.rows_skipped = rows_skipped
 
     conn.commit()

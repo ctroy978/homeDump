@@ -2,30 +2,71 @@
 
 {% block title %}{{ title }}{% endblock %}
 
+{% block head %}
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+{% endblock %}
+
 {% block content %}
 <section class="card">
-  <h2>Welcome</h2>
+  <h2>Pick up makeup homework</h2>
   <p>
-    This tool lets students download makeup homework when they had an allowable
-    absence on the day an assignment was given.
+    Choose your class period, name, and absence date to see homework you can
+    download. You must have had an allowable absence on the day the assignment
+    was given.
   </p>
-  <p class="status-note">
-    <strong>Phase 5 in progress.</strong> Teachers can log in and manage assignments.
-    The student claim form is being built next.
-  </p>
+
+  <form class="student-form" id="claim-form" onsubmit="return false;">
+    <div class="form-field">
+      <label for="period">Class period</label>
+      {% if periods %}
+      <select
+        id="period"
+        name="period"
+        required
+        hx-get="/student/names"
+        hx-target="#name-field"
+        hx-include="#period"
+        hx-trigger="change"
+      >
+        <option value="" selected disabled>Choose your period…</option>
+        {% for p in periods %}
+        <option value="{{ p }}">Period {{ p }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <p class="help-text">
+        No homework has been uploaded yet. Ask your teacher to add assignments in
+        the admin area.
+      </p>
+      {% endif %}
+    </div>
+
+    <div id="name-field">
+      {% with label="Your name", message="Choose your period first." %}
+      {% include "student/_placeholder.html" %}
+      {% endwith %}
+    </div>
+
+    <div id="date-field">
+      {% with label="Absence date", message="Choose your period and name first." %}
+      {% include "student/_placeholder.html" %}
+      {% endwith %}
+    </div>
+
+    <div id="assignments-field">
+      {% with label="Homework", message="Eligible assignments will appear here." %}
+      {% include "student/_placeholder.html" %}
+      {% endwith %}
+    </div>
+  </form>
 </section>
 
-<section class="card">
+<section class="card muted">
   <h2>For teachers</h2>
   <ul>
     <li><a href="/admin/login">Teacher admin login</a></li>
     <li>Upload attendance and add homework assignments</li>
     <li>Review claim logs (coming in Phase 7)</li>
   </ul>
-</section>
-
-<section class="card muted">
-  <h2>Server status</h2>
-  <p>Check <a href="/health">/health</a> to confirm the database is ready.</p>
 </section>
 {% endblock %}

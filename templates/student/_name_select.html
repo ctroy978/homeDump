@@ -1,0 +1,38 @@
+<div id="name-field">
+  <div class="form-field">
+    <label for="student">Your name</label>
+    {% if students %}
+    <select
+      id="student"
+      name="student"
+      required
+      hx-get="/student/dates"
+      hx-target="#date-field"
+      hx-include="#period, #student"
+      hx-trigger="change"
+    >
+      <option value="" selected disabled>Choose your name…</option>
+      {% for name in students %}
+      <option value="{{ name }}">{{ name }}</option>
+      {% endfor %}
+    </select>
+    {% else %}
+    <p class="help-text">
+      No eligible students found for Period {{ period }}.
+      Ask your teacher if attendance and assignments are uploaded.
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<div id="date-field" hx-swap-oob="true">
+  {% with label="Absence date", message="Choose your period and name first." %}
+  {% include "student/_placeholder.html" %}
+  {% endwith %}
+</div>
+
+<div id="assignments-field" hx-swap-oob="true">
+  {% with label="Homework", message="Eligible assignments will appear here." %}
+  {% include "student/_placeholder.html" %}
+  {% endwith %}
+</div>

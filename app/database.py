@@ -12,8 +12,10 @@ from app.config import settings
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS students (
     id INTEGER PRIMARY KEY,
+    sis_number TEXT,
     name TEXT NOT NULL UNIQUE,
     grade TEXT,
+    last_attendance_upload_id INTEGER REFERENCES attendance_uploads(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -81,6 +83,33 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
+def _student_columns(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute("PRAGMA table_info(students)").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _apply_migrations(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after the initial schema."""
+    columns = _student_columns(conn)
+    if "sis_number" not in columns:
+        conn.execute("ALTER TABLE students ADD COLUMN sis_number TEXT")
+    if "last_attendance_upload_id" not in columns:
+        conn.execute(
+            """
+            ALTER TABLE students
+            ADD COLUMN last_attendance_upload_id INTEGER
+            REFERENCES attendance_uploads(id)
+            """
+        )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_students_sis_number
+        ON students(sis_number)
+        WHERE sis_number IS NOT NULL
+        """
+    )
+
+
 def init_schema(conn: sqlite3.Connection | None = None) -> None:
     """
     Create all tables if they are missing.
@@ -91,6 +120,7 @@ def init_schema(conn: sqlite3.Connection | None = None) -> None:
     db = conn or get_connection()
     try:
         db.executescript(SCHEMA_SQL)
+        _apply_migrations(db)
         db.commit()
     finally:
         if owns_connection:

@@ -8,10 +8,17 @@
 <section class="card">
   <h2>Upload Attendance</h2>
   <p>
-    Upload the weekly attendance export (<strong>.txt</strong> or
-    <strong>.xlsx</strong>). The file must include a
+    Upload a year-to-date attendance export for <strong>one class at a time</strong>
+    (<strong>.txt</strong> or <strong>.xlsx</strong>). The file must include a
     <strong>Student Name</strong> column and <strong>Period 0</strong> through
     <strong>Period 7</strong> columns.
+  </p>
+  <p class="help-text">
+    Each student in the file gets their attendance fully refreshed — matched by
+    <strong>SIS number</strong> when present, otherwise by name. Upload one class
+    export at a time; students not in the file are left unchanged. If a student
+    moves from Period 3 to Period 5, upload the export from their
+    <strong>new</strong> class to pick up schedule changes and late notes.
   </p>
 
   {% if request.query_params.get('success') %}
@@ -19,6 +26,10 @@
     Upload complete —
     {{ request.query_params.get('records', '0') }} absence records saved for
     {{ request.query_params.get('students', '0') }} student(s).
+    {% if request.query_params.get('cleared', '0') != '0' %}
+    Replaced {{ request.query_params.get('cleared', '0') }} previous record(s)
+    across the updated students.
+    {% endif %}
   </p>
   {% endif %}
 

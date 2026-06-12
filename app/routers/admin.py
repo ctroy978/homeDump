@@ -184,6 +184,7 @@ async def upload_attendance(
         url=(
             f"/admin/attendance?success=1"
             f"&records={result.records_upserted}"
+            f"&cleared={result.records_cleared}"
             f"&students={result.students_touched}"
         ),
         status_code=303,
