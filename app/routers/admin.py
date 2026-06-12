@@ -30,6 +30,13 @@ from app.services.data_backup import (
     data_dir_has_backup_content,
     write_data_backup,
 )
+from app.services.print_queue import (
+    PrintQueueError,
+    clear_print_queue,
+    list_print_queue,
+    print_batch_and_clear,
+    remove_queue_item,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(settings.project_root / "templates"))
@@ -266,6 +273,62 @@ def claim_logs_page(
             "filters": {"q": q, "status": normalized_status},
         },
     )
+
+
+@router.get("/print-queue", response_class=HTMLResponse)
+def print_queue_page(
+    request: Request,
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/print_queue.html",
+        context={
+            "title": "Print Queue",
+            "queue": list_print_queue(db),
+        },
+    )
+
+
+@router.post("/print-queue/print", response_model=None)
+def print_queue_batch(
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+):
+    """Merge queued PDFs into one file for printing, then empty the queue."""
+    try:
+        batch_path, filename, printed_count = print_batch_and_clear(db)
+    except PrintQueueError:
+        return RedirectResponse(url="/admin/print-queue?error=empty", status_code=303)
+    except OSError:
+        return RedirectResponse(url="/admin/print-queue?error=failed", status_code=303)
+
+    return FileResponse(
+        path=batch_path,
+        filename=filename,
+        media_type="application/pdf",
+        background=BackgroundTask(_remove_temp_file, batch_path),
+    )
+
+
+@router.post("/print-queue/{item_id}/delete")
+def print_queue_delete_item(
+    item_id: int,
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> RedirectResponse:
+    remove_queue_item(db, item_id)
+    return RedirectResponse(url="/admin/print-queue?deleted=1", status_code=303)
+
+
+@router.post("/print-queue/clear")
+def print_queue_clear(
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> RedirectResponse:
+    clear_print_queue(db)
+    return RedirectResponse(url="/admin/print-queue?cleared=1", status_code=303)
 
 
 @router.get("/assignments", response_class=HTMLResponse)

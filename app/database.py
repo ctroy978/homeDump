@@ -75,6 +75,12 @@ CREATE TABLE IF NOT EXISTS claim_logs (
     message TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS print_queue (
+    id INTEGER PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE REFERENCES claim_tokens(token),
+    queued_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 
@@ -118,6 +124,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     claim_columns = _table_columns(conn, "claim_tokens")
     if "period" not in claim_columns:
         conn.execute("ALTER TABLE claim_tokens ADD COLUMN period INTEGER")
+    if "printed_at" not in claim_columns:
+        conn.execute("ALTER TABLE claim_tokens ADD COLUMN printed_at TEXT")
 
     conn.execute(
         """
@@ -136,6 +144,16 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             SELECT id, period FROM assignments WHERE period IS NOT NULL
             """
         )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS print_queue (
+            id INTEGER PRIMARY KEY,
+            token TEXT NOT NULL UNIQUE REFERENCES claim_tokens(token),
+            queued_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
 
 
 def init_schema(conn: sqlite3.Connection | None = None) -> None:

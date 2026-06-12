@@ -2,7 +2,7 @@
 
 A self-contained classroom tool for distributing traceable makeup homework to students who had an allowable absence.
 
-Students on Chromebooks access the app over the local network. The teacher uploads weekly attendance Excel files and homework PDFs. When a student qualifies, the app generates a unique code, QR code, and watermarked PDF.
+Students on Chromebooks access the app over the local network. The teacher uploads weekly attendance Excel files and homework PDFs. When a student qualifies, they confirm a request; the teacher prints a batch of watermarked PDFs with verification QR codes.
 
 ## Requirements
 
@@ -90,35 +90,42 @@ export that currently contains them.
 
    Expected: one row — `2025-09-02|3|Unexcused Absence`
 
-## Verify Phase 6 (claim flow)
+## Verify Phase 6 (print queue)
 
 1. **Prerequisites** — complete the Phase 5 flow until homework appears for a
    qualifying student.
 
-2. **Claim homework** — click **Get my copy** on an assignment card. You should
-   see:
-   - A unique 8-character code
-   - A QR code image
-   - A **Download watermarked PDF** link
+2. **Student request** — click **Confirm request** on an assignment card. The
+   student should see a message that homework was submitted for printing (no
+   download).
 
-3. **Download** — open the PDF and confirm:
+3. **Teacher print queue** — log in and open **Print queue** (`/admin/print-queue`).
+   The student's request should appear in the list.
+
+4. **Print batch** — click **Print batch**. A single merged PDF downloads with
+   each student's watermarked homework. The queue empties automatically.
+
+5. **Check printed PDF** — confirm:
    - A diagonal text watermark on every page (name, code, period, date)
    - A verification **QR code in the top-right corner of page 1**
 
-4. **Verify QR** — scan the QR code (or open the `/verify/{code}` URL). The page
+6. **Verify QR** — scan the QR code (or open the `/verify/{code}` URL). The page
    should show the registered student, assignment, period, and absence date.
 
-5. **Set `PUBLIC_BASE_URL` in `.env`** on the classroom server so QR codes use
-   the address students actually browse to (not `0.0.0.0`):
+7. **Queue cleanup** — use **Remove** on one row or **Clear queue** to discard
+   requests without printing (students can confirm again after removal).
+
+8. **Set `PUBLIC_BASE_URL` in `.env`** so QR codes use the address students
+   actually browse to (not `0.0.0.0`):
 
    ```
    PUBLIC_BASE_URL=http://192.168.1.42:8000
    ```
 
-6. **Run automated tests:**
+9. **Run automated tests:**
 
    ```bash
-   uv run pytest tests/test_claims.py -v
+   uv run pytest tests/test_claims.py tests/test_print_queue.py -v
    ```
 
 ## Verify Phase 5 (student form)
@@ -139,7 +146,7 @@ export that currently contains them.
    - **Period** — only periods with uploaded assignments appear
    - **Student ID** — enter the student's SIS number (not a name dropdown)
    - **Date** — only that student's eligible absence dates appear
-   - **Homework** — matching assignments (claim/download in Phase 6)
+   - **Homework** — matching assignments (confirm for printing in Phase 6)
 
 5. **Run automated tests:**
 
@@ -217,7 +224,7 @@ export that currently contains them.
    sqlite3 data/app.db ".tables"
    ```
 
-   Expected tables: `assignments`, `attendance_records`, `attendance_uploads`, `claim_logs`, `claim_tokens`, `students`
+   Expected tables: `assignments`, `attendance_records`, `attendance_uploads`, `claim_logs`, `claim_tokens`, `print_queue`, `students`
 
 3. **Restart test** — stop and restart the server. It should start cleanly with no errors (schema init is idempotent).
 
@@ -255,8 +262,8 @@ Copy `.env.example` to `.env` and edit as needed:
 | 3 | **Done** | Eligibility engine and tests |
 | 4 | **Done** | Password-protected admin and assignment uploads |
 | 5 | **Done** | Student form with SIS lookup and HTMX dropdowns |
-| 6 | **Done** | Claim flow, QR codes, PDF watermarking |
-| 7 | **Done** | Claim log review, backup/restore scripts |
+| 6 | **Done** | Print queue, watermarked PDFs, QR verification |
+| 7 | **Done** | Claim log review, backup/restore, admin download |
 
 **All planned phases complete.** Say if you want further polish or deployment help.
 

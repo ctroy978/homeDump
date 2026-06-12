@@ -56,6 +56,7 @@ def health_check() -> dict[str, str | list[str]]:
         "assignments",
         "claim_tokens",
         "claim_logs",
+        "print_queue",
     }
     missing = sorted(expected - set(tables))
 

@@ -1,0 +1,25 @@
+<div class="claim-result">
+  {% if already_printed %}
+  <p class="status-note">
+    <strong>{{ claim.assignment_title }}</strong> was already printed. Ask your
+    teacher if you need another copy.
+  </p>
+  {% elif claim.already_queued %}
+  <p class="status-note">
+    <strong>{{ claim.assignment_title }}</strong> is already waiting in the
+    teacher print queue. Ask your teacher if you need another copy.
+  </p>
+  {% else %}
+  <p class="status-note success">
+    <strong>{{ claim.assignment_title }}</strong> has been submitted for
+    printing.
+  </p>
+  <p class="help-text">
+    Your teacher will print this homework. Pick it up in class — you will not
+    download it here.
+  </p>
+  <p class="assignment-meta">
+    Period {{ claim.period }} · Absence {{ claim.absence_date }}
+  </p>
+  {% endif %}
+</div>

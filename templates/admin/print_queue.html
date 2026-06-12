@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Print Queue{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Print queue</h2>
+  <p class="help-text">
+    Students submit homework requests here. Print the batch, then the queue
+    clears automatically. Remove individual items or clear the queue if
+    something looks wrong.
+  </p>
+
+  {% if request.query_params.get('deleted') %}
+  <p class="status-note success">Removed one item from the queue.</p>
+  {% endif %}
+  {% if request.query_params.get('cleared') %}
+  <p class="status-note success">Cleared the entire print queue.</p>
+  {% endif %}
+  {% if request.query_params.get('error') == 'empty' %}
+  <p class="status-note error">The print queue is empty — nothing to print.</p>
+  {% endif %}
+  {% if request.query_params.get('error') == 'failed' %}
+  <p class="status-note error">Batch print failed. Try again or clear the queue.</p>
+  {% endif %}
+
+  <div class="queue-actions">
+    {% if queue %}
+    <form class="inline-delete-form" method="post" action="/admin/print-queue/print">
+      <button type="submit" class="download-button">
+        Print batch ({{ queue|length }})
+      </button>
+    </form>
+    <form
+      class="inline-delete-form"
+      method="post"
+      action="/admin/print-queue/clear"
+      onsubmit="return confirm('Clear the entire print queue without printing?');"
+    >
+      <button type="submit" class="danger-button">Clear queue</button>
+    </form>
+    {% else %}
+    <p class="help-text">No homework is waiting to print.</p>
+    {% endif %}
+  </div>
+
+  {% if queue %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Queued</th>
+        <th>Student</th>
+        <th>Assignment</th>
+        <th>Period</th>
+        <th>Absence date</th>
+        <th>Code</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in queue %}
+      <tr>
+        <td>{{ entry.queued_at }}</td>
+        <td>{{ entry.student_name }}</td>
+        <td>{{ entry.assignment_title }}</td>
+        <td>{{ entry.period }}</td>
+        <td>{{ entry.absence_date }}</td>
+        <td><a href="/verify/{{ entry.token }}">{{ entry.token }}</a></td>
+        <td>
+          <form
+            class="inline-delete-form"
+            method="post"
+            action="/admin/print-queue/{{ entry.id }}/delete"
+            onsubmit="return confirm('Remove this request from the queue?');"
+          >
+            <button type="submit" class="danger-button">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</section>
+{% endblock %}

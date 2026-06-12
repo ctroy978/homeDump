@@ -1,15 +1,16 @@
-"""Student-facing HTMX endpoints for the claim lookup form."""
+"""Student-facing HTMX endpoints for the homework request form."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import get_db
 from app.public_url import PublicUrlError, resolve_public_base_url
-from app.services.claims import ClaimError, claim_pdf_path, process_claim
+from app.services.claims import ClaimError, ClaimResult, process_claim
+from app.services.print_queue import enqueue_token, is_already_printed
 from app.services.student_lookup import (
     LOOKUP_FAILURE_MESSAGE,
     list_eligible_assignments_by_sis,
@@ -98,8 +99,8 @@ def student_assignments(
     )
 
 
-@router.post("/claim", response_class=HTMLResponse)
-def student_claim(
+@router.post("/confirm", response_class=HTMLResponse)
+def student_confirm(
     request: Request,
     assignment_id: int = Form(...),
     period: int = Form(..., ge=0, le=7),
@@ -107,6 +108,7 @@ def student_claim(
     date: str = Form(..., min_length=10, max_length=10),
     db=Depends(get_db),
 ) -> HTMLResponse:
+    """Prepare homework and add it to the teacher print queue."""
     try:
         public_base_url = resolve_public_base_url(request)
         result = process_claim(
@@ -119,6 +121,23 @@ def student_claim(
             client_ip=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
         )
+        if is_already_printed(db, result.token):
+            confirm_result = ClaimResult(
+                token=result.token,
+                student_name=result.student_name,
+                assignment_id=result.assignment_id,
+                assignment_title=result.assignment_title,
+                period=result.period,
+                absence_date=result.absence_date,
+                already_queued=True,
+            )
+            return templates.TemplateResponse(
+                request=request,
+                name="student/_confirm_result.html",
+                context={"claim": confirm_result, "already_printed": True},
+            )
+
+        newly_queued = enqueue_token(db, result.token)
     except PublicUrlError as exc:
         return templates.TemplateResponse(
             request=request,
@@ -134,52 +153,17 @@ def student_claim(
             status_code=400,
         )
 
+    confirm_result = ClaimResult(
+        token=result.token,
+        student_name=result.student_name,
+        assignment_id=result.assignment_id,
+        assignment_title=result.assignment_title,
+        period=result.period,
+        absence_date=result.absence_date,
+        already_queued=not newly_queued,
+    )
     return templates.TemplateResponse(
         request=request,
-        name="student/_claim_result.html",
-        context={"claim": result},
+        name="student/_confirm_result.html",
+        context={"claim": confirm_result, "already_printed": False},
     )
-
-
-@router.get("/claim/{token}/download")
-def download_claimed_pdf(
-    token: str,
-    db=Depends(get_db),
-) -> FileResponse:
-    normalized = token.strip().upper()
-    row = db.execute(
-        "SELECT 1 FROM claim_tokens WHERE token = ?",
-        (normalized,),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Claim not found.")
-
-    pdf_path = claim_pdf_path(normalized)
-    if not pdf_path.exists():
-        raise HTTPException(status_code=404, detail="Claim PDF not found.")
-
-    return FileResponse(
-        path=pdf_path,
-        media_type="application/pdf",
-        filename=f"makeup-homework-{normalized}.pdf",
-    )
-
-
-@router.get("/claim/{token}/qr.png")
-def claim_qr_image(
-    token: str,
-    db=Depends(get_db),
-) -> FileResponse:
-    normalized = token.strip().upper()
-    row = db.execute(
-        "SELECT 1 FROM claim_tokens WHERE token = ?",
-        (normalized,),
-    ).fetchone()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Claim not found.")
-
-    qr_path = settings.qrcodes_dir / f"{normalized}.png"
-    if not qr_path.exists():
-        raise HTTPException(status_code=404, detail="QR code not found.")
-
-    return FileResponse(path=qr_path, media_type="image/png")

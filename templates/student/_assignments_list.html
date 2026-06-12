@@ -1,6 +1,6 @@
 <div id="assignments-field">
   <div class="form-field">
-    <label>Homework you can pick up</label>
+    <label>Homework you can request</label>
     {% if assignments %}
     <ul class="assignment-list">
       {% for item in assignments %}
@@ -16,13 +16,13 @@
           <button
             type="button"
             class="claim-button"
-            hx-post="/student/claim"
+            hx-post="/student/confirm"
             hx-target="#assignment-content-{{ item.id }}"
             hx-swap="innerHTML"
             hx-include="#period, #sis-number, #absence-date"
             hx-vals='{"assignment_id": "{{ item.id }}"}'
           >
-            Get my copy
+            Confirm request
           </button>
         </div>
       </li>

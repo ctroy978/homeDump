@@ -223,8 +223,7 @@ def test_process_claim_refreshes_qr_when_public_url_changes(
     )
 
     assert first.token == second.token
-    assert first.qr_path != second.qr_path
-    assert "v=" in second.qr_path
+    assert (test_settings.qrcodes_dir / f"{first.token}.png").exists()
 
 
 def test_process_claim_rejects_unknown_sis(

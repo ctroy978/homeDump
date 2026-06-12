@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 import sqlite3
 from dataclasses import dataclass
@@ -25,7 +24,7 @@ class ClaimError(Exception):
 
 @dataclass(frozen=True)
 class ClaimResult:
-    """Successful claim details returned to the student UI."""
+    """Successful homework preparation returned to the student UI."""
 
     token: str
     student_name: str
@@ -33,9 +32,7 @@ class ClaimResult:
     assignment_title: str
     period: int
     absence_date: str
-    download_path: str
-    qr_path: str
-    verify_path: str
+    already_queued: bool = False
 
 
 @dataclass(frozen=True)
@@ -216,11 +213,6 @@ def generate_qr_image(token: str, verify_url: str) -> Path:
     return destination
 
 
-def _qr_cache_bust(verify_url: str) -> str:
-    """Short cache-busting token so browsers reload updated QR images."""
-    return hashlib.sha256(verify_url.encode("utf-8")).hexdigest()[:8]
-
-
 def claim_pdf_path(token: str) -> Path:
     return settings.claims_dir / f"{token}.pdf"
 
@@ -237,9 +229,9 @@ def process_claim(
     user_agent: str | None = None,
 ) -> ClaimResult:
     """
-    Validate eligibility, issue a unique token, and prepare download assets.
+    Validate eligibility, issue a unique token, and prepare a watermarked PDF.
 
-    Re-claims for the same student/assignment/date return the existing token.
+    Re-requests for the same student/assignment/date return the existing token.
     """
     student = get_student_by_sis(conn, sis_number)
     if student is None:
@@ -347,10 +339,9 @@ def process_claim(
         client_ip=client_ip,
         user_agent=user_agent,
         success=True,
-        message="Claim issued.",
+        message="Homework prepared for print queue.",
     )
 
-    qr_version = _qr_cache_bust(verify_url)
     return ClaimResult(
         token=token,
         student_name=name,
@@ -358,9 +349,6 @@ def process_claim(
         assignment_title=str(assignment["title"]),
         period=period,
         absence_date=date,
-        download_path=f"/student/claim/{token}/download",
-        qr_path=f"/student/claim/{token}/qr.png?v={qr_version}",
-        verify_path=f"/verify/{token}",
     )
 
 
