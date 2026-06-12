@@ -69,6 +69,34 @@ On the classroom network, students use `http://<server-ip>:8000` instead of `loc
 
    Expected: one row — `2025-09-02|3|Unexcused Absence`
 
+## Verify Phase 4 (admin + assignments)
+
+1. **Set a real admin password** in `.env`:
+
+   ```
+   ADMIN_PASSWORD=your-strong-password
+   SECRET_KEY=some-long-random-string
+   ```
+
+2. **Restart the server:**
+
+   ```bash
+   uv run main
+   ```
+
+3. **Log in** at `http://localhost:8000/admin/login`
+
+4. **Add an assignment** — Period, assigned date, title, and a PDF file.
+
+5. **Verify files on disk:**
+
+   ```bash
+   sqlite3 data/app.db "SELECT id, period, assigned_date, title FROM assignments;"
+   ls -la data/assignments/*/original.pdf
+   ```
+
+6. **Confirm attendance upload requires login** — visiting `/admin/attendance` without logging in should redirect to the login page.
+
 ## Verify Phase 3 (eligibility)
 
 1. **Run automated tests:**
@@ -141,7 +169,7 @@ Copy `.env.example` to `.env` and edit as needed:
 | 1 | **Done** | Project foundation, database schema, health check |
 | 2 | **Done** | Attendance Excel upload and parsing |
 | 3 | **Done** | Eligibility engine and tests |
-| 4 | Planned | Admin dashboard and assignment uploads |
+| 4 | **Done** | Password-protected admin and assignment uploads |
 | 5 | Planned | Student form with HTMX dropdowns |
 | 6 | Planned | Claim flow, QR codes, PDF watermarking |
 | 7 | Planned | Claim logs, backup script, deployment polish |

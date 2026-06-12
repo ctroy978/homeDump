@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Dashboard</h2>
+  <p>Manage attendance imports and homework assignments.</p>
+</section>
+
+<section class="card">
+  <h2>Summary</h2>
+  <ul>
+    <li><strong>{{ student_count }}</strong> students</li>
+    <li><strong>{{ record_count }}</strong> attendance records</li>
+    <li><strong>{{ assignment_count }}</strong> assignments</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>Quick links</h2>
+  <ul>
+    <li><a href="/admin/attendance">Upload attendance report</a></li>
+    <li><a href="/admin/assignments/new">Add new assignment</a></li>
+    <li><a href="/admin/assignments">View all assignments</a></li>
+  </ul>
+</section>
+{% endblock %}

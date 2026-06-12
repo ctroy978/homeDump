@@ -3,6 +3,8 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
+{% include "admin/_nav.html" %}
+
 <section class="card">
   <h2>Upload Attendance</h2>
   <p>
@@ -31,7 +33,7 @@
   </form>
 
   <p class="help-text">
-    Password protection arrives in Phase 4. For testing, use
+    For development testing, use
     <code>uv run python scripts/build_test_fixture.py</code> to create a named
     sample file from <code>cleanatt.xlsx</code>.
   </p>
@@ -71,5 +73,4 @@
 </section>
 {% endif %}
 
-<p><a href="/">← Back to home</a></p>
 {% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Login{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Teacher login</h2>
+  <p>Enter the admin password from your <code>.env</code> file.</p>
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+
+  <form class="upload-form" action="/admin/login" method="post">
+    <input type="hidden" name="next" value="{{ next_path }}">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" required autofocus>
+    <button type="submit">Log in</button>
+  </form>
+</section>
+
+<p><a href="/">← Back to home</a></p>
+{% endblock %}

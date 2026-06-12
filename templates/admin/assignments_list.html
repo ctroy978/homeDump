@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Assignments{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Assignments</h2>
+  {% if request.query_params.get('success') %}
+  <p class="status-note success">Assignment saved successfully.</p>
+  {% endif %}
+
+  <p><a href="/admin/assignments/new">+ Add new assignment</a></p>
+
+  {% if assignments %}
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Period</th>
+        <th>Assigned date</th>
+        <th>Title</th>
+        <th>PDF</th>
+        <th>Created</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in assignments %}
+      <tr>
+        <td>{{ item.id }}</td>
+        <td>{{ item.period }}</td>
+        <td>{{ item.assigned_date }}</td>
+        <td>{{ item.title }}</td>
+        <td>{{ item.pdf_filename }}</td>
+        <td>{{ item.created_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="help-text">No assignments yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

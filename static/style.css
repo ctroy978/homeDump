@@ -136,3 +136,51 @@ main {
 .data-table th {
   background: #f8fafc;
 }
+
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.admin-nav a {
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.logout-form {
+  margin: 0;
+  margin-left: auto;
+}
+
+.logout-form button {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font: inherit;
+  cursor: pointer;
+}
+
+.assignment-form {
+  max-width: 520px;
+}
+
+.assignment-form select,
+.assignment-form input,
+.assignment-form textarea {
+  font: inherit;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.assignment-form textarea {
+  resize: vertical;
+}

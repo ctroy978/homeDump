@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Add Assignment{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Add assignment</h2>
+  <p>
+    Students can claim this homework when they had an allowable absence on the
+    <strong>assigned date</strong> in the matching <strong>period</strong>.
+  </p>
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+
+  <form class="upload-form assignment-form" action="/admin/assignments/new" method="post" enctype="multipart/form-data">
+    <label for="period">Period</label>
+    <select id="period" name="period" required>
+      {% for p in range(8) %}
+      <option value="{{ p }}" {% if form.period == p %}selected{% endif %}>Period {{ p }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="assigned_date">Assigned date</label>
+    <input id="assigned_date" name="assigned_date" type="date" value="{{ form.assigned_date }}" required>
+
+    <label for="title">Title</label>
+    <input id="title" name="title" type="text" value="{{ form.title }}" required>
+
+    <label for="description">Description (optional)</label>
+    <textarea id="description" name="description" rows="3">{{ form.description }}</textarea>
+
+    <label for="pdf">Homework PDF</label>
+    <input id="pdf" name="pdf" type="file" accept=".pdf,application/pdf" required>
+
+    <button type="submit">Save assignment</button>
+  </form>
+</section>
+{% endblock %}
