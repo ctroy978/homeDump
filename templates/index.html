@@ -36,8 +36,7 @@
       </select>
       {% else %}
       <p class="help-text">
-        No homework has been uploaded yet. Ask your teacher to add assignments in
-        the admin area.
+        No homework has been uploaded yet. Ask your teacher.
       </p>
       {% endif %}
     </div>
@@ -60,14 +59,5 @@
       {% endwith %}
     </div>
   </form>
-</section>
-
-<section class="card muted">
-  <h2>For teachers</h2>
-  <ul>
-    <li><a href="/admin/login">Teacher admin login</a></li>
-    <li>Upload attendance and add homework assignments</li>
-    <li><a href="/admin/claims">Review claim logs</a> (requires login)</li>
-  </ul>
 </section>
 {% endblock %}

@@ -25,6 +25,26 @@ Open in a browser:
 
 On the classroom network, students use `http://<server-ip>:8000` instead of `localhost`.
 
+## Teacher admin access
+
+The home page is **student-only** — it does not link to teacher tools. Bookmark
+these URLs for yourself:
+
+| What | URL |
+|------|-----|
+| **Admin login** | `http://localhost:8000/admin/login` |
+| Dashboard | `http://localhost:8000/admin` |
+| Upload attendance | `http://localhost:8000/admin/attendance` |
+| Assignments | `http://localhost:8000/admin/assignments` |
+| Print queue | `http://localhost:8000/admin/print-queue` |
+| Claim logs | `http://localhost:8000/admin/claims` |
+
+On the classroom network, replace `localhost` with your server address (the same
+host you set in `PUBLIC_BASE_URL`).
+
+**Password:** the value of `ADMIN_PASSWORD` in your `.env` file (not shown to
+students). Default in `.env.example` is `changeme` — change it before go-live.
+
 ## Attendance import model
 
 Exports are year-to-date, but you download them **one class at a time**. Imports
