@@ -1,4 +1,4 @@
-"""Queries that power the student claim form dropdowns."""
+"""Queries that power the student claim form."""
 
 from __future__ import annotations
 
@@ -6,6 +6,20 @@ import sqlite3
 from dataclasses import dataclass
 
 from app.services.eligibility import check_eligibility, is_allowable_code
+
+LOOKUP_FAILURE_MESSAGE = (
+    "We couldn't find matching makeup homework. "
+    "Check your period and student ID, or ask your teacher."
+)
+
+
+@dataclass(frozen=True)
+class StudentRecord:
+    """A student resolved from their SIS number."""
+
+    id: int
+    name: str
+    sis_number: str
 
 
 @dataclass(frozen=True)
@@ -19,6 +33,38 @@ class AssignmentOption:
     period: int
 
 
+def normalize_sis_number(sis_number: str) -> str:
+    """Normalize user-entered SIS numbers before lookup."""
+    return sis_number.strip()
+
+
+def get_student_by_sis(
+    conn: sqlite3.Connection,
+    sis_number: str,
+) -> StudentRecord | None:
+    """Return the student row for a SIS number, if one exists."""
+    normalized = normalize_sis_number(sis_number)
+    if not normalized:
+        return None
+
+    row = conn.execute(
+        """
+        SELECT id, name, sis_number
+        FROM students
+        WHERE sis_number = ?
+        """,
+        (normalized,),
+    ).fetchone()
+    if row is None or row["sis_number"] is None:
+        return None
+
+    return StudentRecord(
+        id=int(row["id"]),
+        name=str(row["name"]),
+        sis_number=str(row["sis_number"]),
+    )
+
+
 def list_periods_with_assignments(conn: sqlite3.Connection) -> list[int]:
     """Return class periods that have at least one uploaded assignment."""
     rows = conn.execute(
@@ -27,62 +73,27 @@ def list_periods_with_assignments(conn: sqlite3.Connection) -> list[int]:
     return [int(row["period"]) for row in rows]
 
 
-def list_eligible_students(conn: sqlite3.Connection, period: int) -> list[str]:
-    """
-    Students with an allowable absence in ``period`` on a date that has homework.
-
-    Only includes students where an assignment exists for the same period and
-    assigned date as the absence.
-    """
-    rows = conn.execute(
-        """
-        SELECT DISTINCT s.name, ar.absence_code
-        FROM students s
-        JOIN attendance_records ar ON ar.student_id = s.id
-        JOIN assignments a ON a.assigned_date = ar.absence_date
-        JOIN assignment_periods ap
-            ON ap.assignment_id = a.id AND ap.period = ar.period
-        WHERE ar.period = ?
-        ORDER BY s.name
-        """,
-        (period,),
-    ).fetchall()
-
-    eligible_names: list[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        name = str(row["name"])
-        if name in seen:
-            continue
-        if is_allowable_code(str(row["absence_code"])):
-            eligible_names.append(name)
-            seen.add(name)
-    return eligible_names
-
-
-def list_eligible_dates(
+def list_eligible_dates_for_student(
     conn: sqlite3.Connection,
     period: int,
-    student_name: str,
+    student_id: int,
 ) -> list[str]:
     """
     Absence dates where the student qualifies and homework was assigned.
 
     Dates are returned newest-first (ISO YYYY-MM-DD sorts correctly).
     """
-    name = student_name.strip()
     rows = conn.execute(
         """
         SELECT DISTINCT ar.absence_date, ar.absence_code
         FROM attendance_records ar
-        JOIN students s ON s.id = ar.student_id
         JOIN assignments a ON a.assigned_date = ar.absence_date
         JOIN assignment_periods ap
             ON ap.assignment_id = a.id AND ap.period = ar.period
-        WHERE ar.period = ? AND s.name = ?
+        WHERE ar.period = ? AND ar.student_id = ?
         ORDER BY ar.absence_date DESC
         """,
-        (period, name),
+        (period, student_id),
     ).fetchall()
 
     dates: list[str] = []
@@ -97,14 +108,28 @@ def list_eligible_dates(
     return dates
 
 
-def list_eligible_assignments(
+def list_eligible_dates_by_sis(
     conn: sqlite3.Connection,
     period: int,
+    sis_number: str,
+) -> tuple[StudentRecord | None, list[str]]:
+    """Resolve a student by SIS and return their eligible absence dates."""
+    student = get_student_by_sis(conn, sis_number)
+    if student is None:
+        return None, []
+
+    dates = list_eligible_dates_for_student(conn, period, student.id)
+    return student, dates
+
+
+def list_eligible_assignments_for_student(
+    conn: sqlite3.Connection,
+    period: int,
+    student_id: int,
     student_name: str,
     absence_date: str,
 ) -> list[AssignmentOption]:
     """Assignments the student can claim for the selected period and date."""
-    name = student_name.strip()
     date = absence_date.strip()
 
     rows = conn.execute(
@@ -120,7 +145,7 @@ def list_eligible_assignments(
 
     options: list[AssignmentOption] = []
     for row in rows:
-        result = check_eligibility(conn, name, period, date)
+        result = check_eligibility(conn, student_name, period, date)
         if not result.eligible:
             continue
         options.append(
@@ -133,3 +158,24 @@ def list_eligible_assignments(
             )
         )
     return options
+
+
+def list_eligible_assignments_by_sis(
+    conn: sqlite3.Connection,
+    period: int,
+    sis_number: str,
+    absence_date: str,
+) -> tuple[StudentRecord | None, list[AssignmentOption]]:
+    """Resolve a student by SIS and return claimable assignments."""
+    student = get_student_by_sis(conn, sis_number)
+    if student is None:
+        return None, []
+
+    options = list_eligible_assignments_for_student(
+        conn,
+        period,
+        student.id,
+        student.name,
+        absence_date,
+    )
+    return student, options

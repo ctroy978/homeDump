@@ -281,13 +281,22 @@ main {
   margin-bottom: 0.35rem;
 }
 
-.form-field select {
+.form-field select,
+.form-field input[type="text"] {
   width: 100%;
   font: inherit;
   padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--surface);
+}
+
+.sis-continue-button {
+  margin-top: 0.75rem;
+}
+
+.error-text {
+  color: #b42318;
 }
 
 .muted-field .help-text {

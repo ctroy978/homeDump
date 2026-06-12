@@ -15,6 +15,7 @@ from pypdf import PdfReader, PdfWriter
 from app.config import settings
 from app.services.assignments import get_assignment_pdf_path
 from app.services.eligibility import check_eligibility
+from app.services.student_lookup import LOOKUP_FAILURE_MESSAGE, get_student_by_sis
 
 
 class ClaimError(Exception):
@@ -58,16 +59,6 @@ def _generate_token(conn: sqlite3.Connection) -> str:
         if row is None:
             return token
     raise RuntimeError("Failed to generate a unique claim token.")
-
-
-def _student_id(conn: sqlite3.Connection, student_name: str) -> int:
-    row = conn.execute(
-        "SELECT id FROM students WHERE name = ?",
-        (student_name.strip(),),
-    ).fetchone()
-    if row is None:
-        raise ClaimError("Student not found.")
-    return int(row["id"])
 
 
 def _assignment_for_period(
@@ -234,7 +225,7 @@ def claim_pdf_path(token: str) -> Path:
 def process_claim(
     conn: sqlite3.Connection,
     *,
-    student_name: str,
+    sis_number: str,
     assignment_id: int,
     period: int,
     absence_date: str,
@@ -247,7 +238,23 @@ def process_claim(
 
     Re-claims for the same student/assignment/date return the existing token.
     """
-    name = student_name.strip()
+    student = get_student_by_sis(conn, sis_number)
+    if student is None:
+        log_claim(
+            conn,
+            student_name="Unknown",
+            assignment_id=assignment_id,
+            period=period,
+            absence_date=absence_date.strip(),
+            token=None,
+            client_ip=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="SIS lookup failed during claim.",
+        )
+        raise ClaimError(LOOKUP_FAILURE_MESSAGE)
+
+    name = student.name
     date = absence_date.strip()
     assignment = _assignment_for_period(conn, assignment_id, period)
 
@@ -282,7 +289,7 @@ def process_claim(
         )
         raise ClaimError(eligibility.reason)
 
-    student_id = _student_id(conn, name)
+    student_id = student.id
     existing = conn.execute(
         """
         SELECT token

@@ -1,0 +1,38 @@
+<div id="sis-field">
+  <div class="form-field">
+    <label for="sis-number">Student ID (SIS number)</label>
+    <p class="help-text">
+      Enter the student ID from your schedule or student portal.
+    </p>
+    <input
+      type="text"
+      id="sis-number"
+      name="sis_number"
+      inputmode="numeric"
+      autocomplete="off"
+      required
+      placeholder="Your student ID"
+    >
+    <button
+      type="button"
+      class="claim-button sis-continue-button"
+      hx-post="/student/lookup"
+      hx-target="#date-field"
+      hx-include="#period, #sis-number"
+    >
+      Continue
+    </button>
+  </div>
+</div>
+
+<div id="date-field" hx-swap-oob="true">
+  {% with label="Absence date", message="Enter your student ID and click Continue." %}
+  {% include "student/_placeholder.html" %}
+  {% endwith %}
+</div>
+
+<div id="assignments-field" hx-swap-oob="true">
+  {% with label="Homework", message="Eligible assignments will appear here." %}
+  {% include "student/_placeholder.html" %}
+  {% endwith %}
+</div>

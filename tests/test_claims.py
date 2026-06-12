@@ -20,6 +20,7 @@ from app.services.claims import (
     get_claim_by_token,
     process_claim,
 )
+from app.services.student_lookup import LOOKUP_FAILURE_MESSAGE
 
 
 @pytest.fixture
@@ -53,7 +54,7 @@ def claim_env(
     conn.execute("PRAGMA foreign_keys = ON")
     init_schema(conn)
 
-    student_id = upsert_student(conn, "Test Student A", "10")
+    student_id = upsert_student(conn, "Test Student A", "10", sis_number="10001")
     conn.execute(
         """
         INSERT INTO attendance_records (
@@ -95,7 +96,7 @@ def test_process_claim_issues_token_and_assets(
 
     result = process_claim(
         conn,
-        student_name="Test Student A",
+        sis_number="10001",
         assignment_id=assignment_id,
         period=0,
         absence_date="2025-09-29",
@@ -125,7 +126,7 @@ def test_process_claim_is_idempotent(
 
     first = process_claim(
         conn,
-        student_name="Test Student A",
+        sis_number="10001",
         assignment_id=assignment_id,
         period=0,
         absence_date="2025-09-29",
@@ -133,7 +134,7 @@ def test_process_claim_is_idempotent(
     )
     second = process_claim(
         conn,
-        student_name="Test Student A",
+        sis_number="10001",
         assignment_id=assignment_id,
         period=0,
         absence_date="2025-09-29",
@@ -162,10 +163,27 @@ def test_process_claim_rejects_ineligible_student(
     with pytest.raises(ClaimError):
         process_claim(
             conn,
-            student_name="Test Student A",
+            sis_number="10001",
             assignment_id=assignment_id,
             period=3,
             absence_date="2025-09-02",
+            public_base_url="http://classroom.test:8000",
+        )
+
+
+def test_process_claim_rejects_unknown_sis(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, test_settings = claim_env
+    assignment_id = _seed_assignment(conn, test_settings)
+
+    with pytest.raises(ClaimError, match=LOOKUP_FAILURE_MESSAGE):
+        process_claim(
+            conn,
+            sis_number="999999",
+            assignment_id=assignment_id,
+            period=0,
+            absence_date="2025-09-29",
             public_base_url="http://classroom.test:8000",
         )
 
@@ -178,7 +196,7 @@ def test_get_claim_by_token(
 
     result = process_claim(
         conn,
-        student_name="Test Student A",
+        sis_number="10001",
         assignment_id=assignment_id,
         period=0,
         absence_date="2025-09-29",

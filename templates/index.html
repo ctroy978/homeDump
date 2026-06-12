@@ -10,9 +10,9 @@
 <section class="card">
   <h2>Pick up makeup homework</h2>
   <p>
-    Choose your class period, name, and absence date to see homework you can
-    download. You must have had an allowable absence on the day the assignment
-    was given.
+    Choose your class period, enter your student ID, and pick the date you were
+    absent to see homework you can download. You must have had an allowable
+    absence on the day the assignment was given.
   </p>
 
   <form class="student-form" id="claim-form" onsubmit="return false;">
@@ -23,8 +23,8 @@
         id="period"
         name="period"
         required
-        hx-get="/student/names"
-        hx-target="#name-field"
+        hx-get="/student/sis-field"
+        hx-target="#sis-field"
         hx-include="#period"
         hx-trigger="change"
       >
@@ -41,14 +41,14 @@
       {% endif %}
     </div>
 
-    <div id="name-field">
-      {% with label="Your name", message="Choose your period first." %}
+    <div id="sis-field">
+      {% with label="Student ID", message="Choose your period first." %}
       {% include "student/_placeholder.html" %}
       {% endwith %}
     </div>
 
     <div id="date-field">
-      {% with label="Absence date", message="Choose your period and name first." %}
+      {% with label="Absence date", message="Enter your student ID first." %}
       {% include "student/_placeholder.html" %}
       {% endwith %}
     </div>

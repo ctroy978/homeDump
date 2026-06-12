@@ -19,7 +19,7 @@
             hx-post="/student/claim"
             hx-target="#assignment-content-{{ item.id }}"
             hx-swap="innerHTML"
-            hx-include="#period, #student, #absence-date"
+            hx-include="#period, #sis-number, #absence-date"
             hx-vals='{"assignment_id": "{{ item.id }}"}'
           >
             Get my copy
@@ -30,8 +30,8 @@
     </ul>
     {% else %}
     <p class="help-text">
-      No homework assignments match this absence. Check your period, name, and date,
-      or ask your teacher.
+      No homework assignments match this absence. Check your period, student ID,
+      and date, or ask your teacher.
     </p>
     {% endif %}
   </div>

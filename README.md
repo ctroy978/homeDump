@@ -123,8 +123,9 @@ export that currently contains them.
 
 ## Verify Phase 5 (student form)
 
-1. **Prerequisites** — attendance uploaded (Phase 2) and at least one assignment
-   added (Phase 4) for a period/date where a test student has an allowable absence.
+1. **Prerequisites** — attendance uploaded (Phase 2) with **Sis Number** in the
+   export, and at least one assignment added (Phase 4) for a period/date where a
+   test student has an allowable absence.
 
 2. **Start the server:**
 
@@ -134,11 +135,11 @@ export that currently contains them.
 
 3. **Open the home page** at `http://localhost:8000/`
 
-4. **Walk through the cascading dropdowns:**
+4. **Walk through the student flow:**
    - **Period** — only periods with uploaded assignments appear
-   - **Name** — students with an allowable absence on a date that has homework
-   - **Date** — eligible absence dates for that student and period
-   - **Homework** — matching assignments (download comes in Phase 6)
+   - **Student ID** — enter the student's SIS number (not a name dropdown)
+   - **Date** — only that student's eligible absence dates appear
+   - **Homework** — matching assignments (claim/download in Phase 6)
 
 5. **Run automated tests:**
 
@@ -146,10 +147,10 @@ export that currently contains them.
    uv run pytest tests/test_student_lookup.py -v
    ```
 
-6. **HTMX partials** — each dropdown loads via:
-   - `/student/names?period=N`
-   - `/student/dates?period=N&student=...`
-   - `/student/assignments?period=N&student=...&date=YYYY-MM-DD`
+6. **HTMX partials** — each step loads via:
+   - `/student/sis-field?period=N`
+   - `POST /student/lookup` with `period` and `sis_number`
+   - `POST /student/assignments` with `period`, `sis_number`, and `date`
 
 ## Verify Phase 4 (admin + assignments)
 
@@ -253,7 +254,7 @@ Copy `.env.example` to `.env` and edit as needed:
 | 2 | **Done** | Attendance Excel upload and parsing |
 | 3 | **Done** | Eligibility engine and tests |
 | 4 | **Done** | Password-protected admin and assignment uploads |
-| 5 | **Done** | Student form with HTMX dropdowns |
+| 5 | **Done** | Student form with SIS lookup and HTMX dropdowns |
 | 6 | **Done** | Claim flow, QR codes, PDF watermarking |
 | 7 | **Current** | Claim logs, backup script, deployment polish |
 

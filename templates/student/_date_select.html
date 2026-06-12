@@ -1,14 +1,15 @@
 <div id="date-field">
   <div class="form-field">
     <label for="absence-date">Date you were absent</label>
+    <p class="help-text">Signed in as {{ student_name }}.</p>
     {% if dates %}
     <select
       id="absence-date"
       name="date"
       required
-      hx-get="/student/assignments"
+      hx-post="/student/assignments"
       hx-target="#assignments-field"
-      hx-include="#period, #student, #absence-date"
+      hx-include="#period, #sis-number, #absence-date"
       hx-trigger="change"
     >
       <option value="" selected disabled>Choose the date…</option>
@@ -17,15 +18,16 @@
       {% endfor %}
     </select>
     {% else %}
-    <p class="help-text">
-      No eligible absence dates found for this period and name.
+    <p class="help-text error-text">
+      No eligible absence dates found. Ask your teacher if attendance and
+      assignments are uploaded.
     </p>
     {% endif %}
   </div>
 </div>
 
 <div id="assignments-field" hx-swap-oob="true">
-  {% with label="Homework", message="Eligible assignments will appear here." %}
+  {% with label="Homework", message="Choose your absence date to see homework." %}
   {% include "student/_placeholder.html" %}
   {% endwith %}
 </div>

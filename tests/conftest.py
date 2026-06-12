@@ -23,7 +23,7 @@ def db_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     init_schema(conn)
 
-    student_id = upsert_student(conn, "Test Student A", "10")
+    student_id = upsert_student(conn, "Test Student A", "10", sis_number="10001")
     records = [
         ("2025-09-02", 3, "Unexcused Absence"),
         ("2025-09-02", 4, "Tardy Unexcused"),

@@ -1,0 +1,12 @@
+<div id="date-field">
+  <div class="form-field">
+    <label>Absence date</label>
+    <p class="help-text error-text">{{ message }}</p>
+  </div>
+</div>
+
+<div id="assignments-field" hx-swap-oob="true">
+  {% with label="Homework", message="Eligible assignments will appear here." %}
+  {% include "student/_placeholder.html" %}
+  {% endwith %}
+</div>

@@ -11,9 +11,9 @@ from app.database import get_db
 from app.public_url import PublicUrlError, resolve_public_base_url
 from app.services.claims import ClaimError, claim_pdf_path, process_claim
 from app.services.student_lookup import (
-    list_eligible_assignments,
-    list_eligible_dates,
-    list_eligible_students,
+    LOOKUP_FAILURE_MESSAGE,
+    list_eligible_assignments_by_sis,
+    list_eligible_dates_by_sis,
 )
 
 router = APIRouter(prefix="/student", tags=["student"])
@@ -26,50 +26,72 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host
 
 
-@router.get("/names", response_class=HTMLResponse)
-def student_names(
-    request: Request,
-    period: int = Query(..., ge=0, le=7),
-    db=Depends(get_db),
-) -> HTMLResponse:
-    students = list_eligible_students(db, period)
+def _lookup_failure_response(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
-        name="student/_name_select.html",
-        context={"period": period, "students": students},
+        name="student/_lookup_failure.html",
+        context={"message": LOOKUP_FAILURE_MESSAGE},
     )
 
 
-@router.get("/dates", response_class=HTMLResponse)
-def student_dates(
+@router.get("/sis-field", response_class=HTMLResponse)
+def student_sis_field(
     request: Request,
     period: int = Query(..., ge=0, le=7),
-    student: str = Query(..., min_length=1),
+) -> HTMLResponse:
+    """Show the SIS number field after a period is selected."""
+    return templates.TemplateResponse(
+        request=request,
+        name="student/_sis_field.html",
+        context={"period": period},
+    )
+
+
+@router.post("/lookup", response_class=HTMLResponse)
+def student_lookup(
+    request: Request,
+    period: int = Form(..., ge=0, le=7),
+    sis_number: str = Form(..., min_length=1),
     db=Depends(get_db),
 ) -> HTMLResponse:
-    dates = list_eligible_dates(db, period, student)
+    """Resolve a student by SIS and reveal only their eligible absence dates."""
+    student, dates = list_eligible_dates_by_sis(db, period, sis_number)
+    if student is None or not dates:
+        return _lookup_failure_response(request)
+
     return templates.TemplateResponse(
         request=request,
         name="student/_date_select.html",
-        context={"period": period, "student": student.strip(), "dates": dates},
+        context={
+            "period": period,
+            "sis_number": student.sis_number,
+            "student_name": student.name,
+            "dates": dates,
+        },
     )
 
 
-@router.get("/assignments", response_class=HTMLResponse)
+@router.post("/assignments", response_class=HTMLResponse)
 def student_assignments(
     request: Request,
-    period: int = Query(..., ge=0, le=7),
-    student: str = Query(..., min_length=1),
-    date: str = Query(..., min_length=10, max_length=10),
+    period: int = Form(..., ge=0, le=7),
+    sis_number: str = Form(..., min_length=1),
+    date: str = Form(..., min_length=10, max_length=10),
     db=Depends(get_db),
 ) -> HTMLResponse:
-    assignments = list_eligible_assignments(db, period, student, date)
+    student, assignments = list_eligible_assignments_by_sis(
+        db, period, sis_number, date
+    )
+    if student is None or not assignments:
+        return _lookup_failure_response(request)
+
     return templates.TemplateResponse(
         request=request,
         name="student/_assignments_list.html",
         context={
             "period": period,
-            "student": student.strip(),
+            "sis_number": student.sis_number,
+            "student_name": student.name,
             "date": date.strip(),
             "assignments": assignments,
         },
@@ -81,7 +103,7 @@ def student_claim(
     request: Request,
     assignment_id: int = Form(...),
     period: int = Form(..., ge=0, le=7),
-    student: str = Form(..., min_length=1),
+    sis_number: str = Form(..., min_length=1),
     date: str = Form(..., min_length=10, max_length=10),
     db=Depends(get_db),
 ) -> HTMLResponse:
@@ -89,7 +111,7 @@ def student_claim(
         public_base_url = resolve_public_base_url(request)
         result = process_claim(
             db,
-            student_name=student,
+            sis_number=sis_number,
             assignment_id=assignment_id,
             period=period,
             absence_date=date,
