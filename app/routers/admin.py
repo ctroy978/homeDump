@@ -155,10 +155,10 @@ def _remove_temp_file(path: Path) -> None:
     path.unlink(missing_ok=True)
 
 
-@router.get("/backup/download")
+@router.get("/backup/download", response_model=None)
 def download_backup(
     _admin: None = Depends(require_admin),
-) -> FileResponse | RedirectResponse:
+):
     """Build a classroom data archive and send it to the teacher's browser."""
     if not data_dir_has_backup_content(settings.data_dir):
         return RedirectResponse(url="/admin?backup_error=empty", status_code=303)
