@@ -101,8 +101,9 @@ export that currently contains them.
    - A QR code image
    - A **Download watermarked PDF** link
 
-3. **Download** — open the PDF and confirm it contains a watermark with the
-   student name, code, period, date, and assignment title.
+3. **Download** — open the PDF and confirm:
+   - A diagonal text watermark on every page (name, code, period, date)
+   - A verification **QR code in the top-right corner of page 1**
 
 4. **Verify QR** — scan the QR code (or open the `/verify/{code}` URL). The page
    should show the registered student, assignment, period, and absence date.

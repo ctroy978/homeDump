@@ -105,7 +105,9 @@ def test_process_claim_issues_token_and_assets(
     )
 
     assert len(result.token) == 8
-    assert claim_pdf_path(result.token).exists()
+    pdf_path = claim_pdf_path(result.token)
+    assert pdf_path.exists()
+    assert pdf_path.stat().st_size > 500
     assert (test_settings.qrcodes_dir / f"{result.token}.png").exists()
 
     row = conn.execute(
