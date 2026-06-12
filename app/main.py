@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import init_schema, list_tables
-from app.routers import admin
+from app.routers import admin, dev
 
 TEMPLATES_DIR = settings.project_root / "templates"
 STATIC_DIR = settings.project_root / "static"
@@ -39,6 +39,7 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 app.include_router(admin.router)
+app.include_router(dev.router)
 
 
 @app.get("/health")

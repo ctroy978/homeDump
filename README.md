@@ -69,6 +69,29 @@ On the classroom network, students use `http://<server-ip>:8000` instead of `loc
 
    Expected: one row — `2025-09-02|3|Unexcused Absence`
 
+## Verify Phase 3 (eligibility)
+
+1. **Run automated tests:**
+
+   ```bash
+   uv add --dev pytest   # first time only
+   uv run pytest tests/test_eligibility.py -v
+   ```
+
+2. **Optional live check** — set `DEBUG=true` in `.env`, restart, then:
+
+   ```bash
+   curl "http://localhost:8000/dev/eligibility?student=STUDENT_NAME&period=3&date=2025-09-02"
+   ```
+
+   Replace `STUDENT_NAME` and the date/period with values from your uploaded attendance data. Use this only on the server — do not paste real student names into chat.
+
+3. **Customize allowable codes** in `.env`:
+
+   ```
+   ALLOWABLE_ABSENCE_CODES=Excused Absence,Sports-Athletics,Illness,...
+   ```
+
 ## Verify Phase 1
 
 1. **Health endpoint** — should return `"status": "ok"` and list six tables:
@@ -117,7 +140,7 @@ Copy `.env.example` to `.env` and edit as needed:
 |-------|--------|--------------|
 | 1 | **Done** | Project foundation, database schema, health check |
 | 2 | **Done** | Attendance Excel upload and parsing |
-| 3 | Planned | Eligibility engine and tests |
+| 3 | **Done** | Eligibility engine and tests |
 | 4 | Planned | Admin dashboard and assignment uploads |
 | 5 | Planned | Student form with HTMX dropdowns |
 | 6 | Planned | Claim flow, QR codes, PDF watermarking |
