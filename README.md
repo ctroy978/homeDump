@@ -170,9 +170,11 @@ Copy `.env.example` to `.env` and edit as needed:
 | 2 | **Done** | Attendance Excel upload and parsing |
 | 3 | **Done** | Eligibility engine and tests |
 | 4 | **Done** | Password-protected admin and assignment uploads |
-| 5 | Planned | Student form with HTMX dropdowns |
+| 5 | **Current** | Student form with HTMX dropdowns |
 | 6 | Planned | Claim flow, QR codes, PDF watermarking |
 | 7 | Planned | Claim logs, backup script, deployment polish |
+
+**Current focus: Phase 5** — student-facing form with cascading dropdowns (Period → Name → Date → eligible assignments).
 
 After testing each phase, say **"build Phase N"** to continue.
 
