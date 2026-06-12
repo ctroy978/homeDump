@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import get_db
+from app.public_url import PublicUrlError, resolve_public_base_url
 from app.services.claims import ClaimError, claim_pdf_path, process_claim
 from app.services.student_lookup import (
     list_eligible_assignments,
@@ -17,12 +18,6 @@ from app.services.student_lookup import (
 
 router = APIRouter(prefix="/student", tags=["student"])
 templates = Jinja2Templates(directory=str(settings.project_root / "templates"))
-
-
-def _public_base_url(request: Request) -> str:
-    if settings.public_base_url:
-        return settings.public_base_url.rstrip("/")
-    return str(request.base_url).rstrip("/")
 
 
 def _client_ip(request: Request) -> str | None:
@@ -91,15 +86,23 @@ def student_claim(
     db=Depends(get_db),
 ) -> HTMLResponse:
     try:
+        public_base_url = resolve_public_base_url(request)
         result = process_claim(
             db,
             student_name=student,
             assignment_id=assignment_id,
             period=period,
             absence_date=date,
-            public_base_url=_public_base_url(request),
+            public_base_url=public_base_url,
             client_ip=_client_ip(request),
             user_agent=request.headers.get("user-agent"),
+        )
+    except PublicUrlError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="student/_claim_error.html",
+            context={"message": str(exc)},
+            status_code=400,
         )
     except ClaimError as exc:
         return templates.TemplateResponse(

@@ -11,6 +11,29 @@
 </section>
 
 <section class="card">
+  <h2>Student access URL</h2>
+  {% if student_url %}
+  <p>
+    Students and QR codes should use:
+    <strong><a href="{{ student_url }}/">{{ student_url }}</a></strong>
+  </p>
+  {% if not public_base_url_set %}
+  <p class="help-text">
+    Auto-detected from your current browser address. If the classroom IP changes,
+    open the admin site using the new address before students claim homework, or
+    set <code>PUBLIC_BASE_URL</code> in <code>.env</code>.
+  </p>
+  {% endif %}
+  {% else %}
+  <p class="status-note error">
+    Set <code>PUBLIC_BASE_URL=http://&lt;classroom-ip&gt;:8000</code> in
+    <code>.env</code> so QR codes work on student phones. Do not use
+    <code>0.0.0.0</code> or <code>localhost</code>.
+  </p>
+  {% endif %}
+</section>
+
+<section class="card">
   <h2>Summary</h2>
   <ul>
     <li><strong>{{ student_count }}</strong> students</li>
