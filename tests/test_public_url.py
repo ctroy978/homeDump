@@ -8,7 +8,12 @@ import pytest
 from starlette.requests import Request
 
 from app import config
-from app.public_url import PublicUrlError, resolve_public_base_url, suggest_public_base_url
+from app.public_url import (
+    PublicUrlError,
+    hostname_url_hints,
+    resolve_public_base_url,
+    suggest_public_base_url,
+)
 
 
 def _request(
@@ -66,3 +71,25 @@ def test_suggest_returns_none_for_invalid_host(
     monkeypatch.setattr(config, "settings", test_settings)
     monkeypatch.setattr("app.public_url.settings", test_settings)
     assert suggest_public_base_url(_request("0.0.0.0:8000")) is None
+
+
+def test_resolve_accepts_hostname(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_settings = types.SimpleNamespace(public_base_url=None)
+    monkeypatch.setattr(config, "settings", test_settings)
+    monkeypatch.setattr("app.public_url.settings", test_settings)
+    url = resolve_public_base_url(_request("classroom-pc.local:8000"))
+    assert url == "http://classroom-pc.local:8000"
+
+
+def test_hostname_url_hints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_settings = types.SimpleNamespace(port=8000)
+    monkeypatch.setattr("app.public_url.settings", test_settings)
+    monkeypatch.setattr("app.public_url.socket.gethostname", lambda: "classroom-pc")
+    assert hostname_url_hints() == [
+        "http://classroom-pc:8000",
+        "http://classroom-pc.local:8000",
+    ]

@@ -19,17 +19,28 @@
   </p>
   {% if not public_base_url_set %}
   <p class="help-text">
-    Auto-detected from your current browser address. If the classroom IP changes,
-    open the admin site using the new address before students claim homework, or
-    set <code>PUBLIC_BASE_URL</code> in <code>.env</code>.
+    Auto-detected from your current browser address. You can use a classroom IP
+    <em>or hostname</em> (for example <code>http://my-laptop.local:8000</code>).
+    If the IP changes often, set a stable <code>PUBLIC_BASE_URL</code> in
+    <code>.env</code>.
   </p>
   {% endif %}
   {% else %}
   <p class="status-note error">
-    Set <code>PUBLIC_BASE_URL=http://&lt;classroom-ip&gt;:8000</code> in
-    <code>.env</code> so QR codes work on student phones. Do not use
+    Set <code>PUBLIC_BASE_URL</code> in <code>.env</code> to the address
+    students use in Chrome — an IP or hostname is fine. Do not use
     <code>0.0.0.0</code> or <code>localhost</code>.
   </p>
+  {% if hostname_hints %}
+  <p class="help-text">
+    Hostname options to try on student Chromebooks:
+    {% for hint in hostname_hints %}
+    <code>{{ hint }}</code>{% if not loop.last %}, {% endif %}
+    {% endfor %}
+    — test one from a student device, then set the working value as
+    <code>PUBLIC_BASE_URL</code>.
+  </p>
+  {% endif %}
   {% endif %}
 </section>
 

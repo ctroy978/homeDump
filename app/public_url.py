@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import socket
+
 from fastapi import Request
 
 from app.config import settings
@@ -29,14 +31,15 @@ def resolve_public_base_url(request: Request) -> str:
     if not host:
         raise PublicUrlError(
             "Set PUBLIC_BASE_URL in .env to the address students use in Chrome "
-            "(for example http://192.168.1.50:8000)."
+            "(for example http://192.168.1.50:8000 or http://classroom-pc.local:8000)."
         )
 
     hostname = host.split(":", 1)[0].lower().strip("[]")
     if hostname in _INVALID_HOSTS:
         raise PublicUrlError(
             "Set PUBLIC_BASE_URL in .env to the address students use in Chrome "
-            f"(for example http://192.168.1.50:8000). QR codes cannot use {hostname}."
+            f"(for example http://192.168.1.50:8000 or http://classroom-pc.local:8000). "
+            f"QR codes cannot use {hostname}."
         )
 
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
@@ -52,3 +55,20 @@ def suggest_public_base_url(request: Request) -> str | None:
         return resolve_public_base_url(request)
     except PublicUrlError:
         return None
+
+
+def hostname_url_hints(port: int | None = None) -> list[str]:
+    """
+    Suggest hostname-based URLs teachers can try on the classroom network.
+
+    Useful when the LAN IP changes but the computer name stays the same.
+    """
+    listen_port = port if port is not None else settings.port
+    name = socket.gethostname().strip().lower()
+    if not name or name in _INVALID_HOSTS:
+        return []
+
+    hints: list[str] = []
+    for host in (name, f"{name}.local"):
+        hints.append(f"http://{host}:{listen_port}")
+    return hints

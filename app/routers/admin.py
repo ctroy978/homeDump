@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import get_db
-from app.public_url import suggest_public_base_url
+from app.public_url import hostname_url_hints, suggest_public_base_url
 from app.dependencies import (
     ADMIN_COOKIE_MAX_AGE,
     ADMIN_COOKIE_NAME,
@@ -135,6 +135,7 @@ def admin_dashboard(
         context={
             "title": "Admin Dashboard",
             "student_url": suggest_public_base_url(request),
+            "hostname_hints": hostname_url_hints(),
             "public_base_url_set": bool(settings.public_base_url),
             **_admin_summary(db),
         },
