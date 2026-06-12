@@ -17,6 +17,7 @@ from app.services.attendance_parser import upsert_student
 from app.services.claims import (
     ClaimError,
     claim_pdf_path,
+    generate_qr_image,
     get_claim_by_token,
     process_claim,
 )
@@ -169,6 +170,61 @@ def test_process_claim_rejects_ineligible_student(
             absence_date="2025-09-02",
             public_base_url="http://classroom.test:8000",
         )
+
+
+def test_generate_qr_image_overwrites_existing_url(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, test_settings = claim_env
+    calls: list[str] = []
+
+    def _record_make(url: str):
+        calls.append(url)
+        from PIL import Image
+
+        image = Image.new("RGB", (10, 10), color="white")
+        return image
+
+    monkeypatch.setattr("app.services.claims.qrcode.make", _record_make)
+
+    token = "ABCD1234"
+    generate_qr_image(token, "http://old-host:8000/verify/ABCD1234")
+    generate_qr_image(token, "http://new-host:8000/verify/ABCD1234")
+
+    assert calls == [
+        "http://old-host:8000/verify/ABCD1234",
+        "http://new-host:8000/verify/ABCD1234",
+    ]
+    assert (test_settings.qrcodes_dir / f"{token}.png").exists()
+
+
+def test_process_claim_refreshes_qr_when_public_url_changes(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, test_settings = claim_env
+    assignment_id = _seed_assignment(conn, test_settings)
+
+    first = process_claim(
+        conn,
+        sis_number="10001",
+        assignment_id=assignment_id,
+        period=0,
+        absence_date="2025-09-29",
+        public_base_url="http://old-host:8000",
+    )
+    second = process_claim(
+        conn,
+        sis_number="10001",
+        assignment_id=assignment_id,
+        period=0,
+        absence_date="2025-09-29",
+        public_base_url="http://new-host:8000",
+    )
+
+    assert first.token == second.token
+    assert first.qr_path != second.qr_path
+    assert "v=" in second.qr_path
 
 
 def test_process_claim_rejects_unknown_sis(

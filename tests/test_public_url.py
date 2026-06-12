@@ -83,6 +83,28 @@ def test_resolve_accepts_hostname(
     assert url == "http://classroom-pc.local:8000"
 
 
+def test_resolve_rejects_invalid_public_base_url_in_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_settings = types.SimpleNamespace(
+        public_base_url="http://0.0.0.0:8000",
+    )
+    monkeypatch.setattr(config, "settings", test_settings)
+    monkeypatch.setattr("app.public_url.settings", test_settings)
+    with pytest.raises(PublicUrlError, match="0.0.0.0"):
+        resolve_public_base_url(_request("classroom-pc.local:8000"))
+
+
+def test_resolve_rejects_malformed_public_base_url_in_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_settings = types.SimpleNamespace(public_base_url="classroom-pc.local:8000")
+    monkeypatch.setattr(config, "settings", test_settings)
+    monkeypatch.setattr("app.public_url.settings", test_settings)
+    with pytest.raises(PublicUrlError, match="scheme and host"):
+        resolve_public_base_url(_request("classroom-pc.local:8000"))
+
+
 def test_hostname_url_hints(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

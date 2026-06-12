@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import sqlite3
 from dataclasses import dataclass
@@ -207,15 +208,17 @@ def watermark_pdf(
 
 
 def generate_qr_image(token: str, verify_url: str) -> Path:
-    """Create a QR code PNG that links to the public verification page."""
+    """Create or refresh a QR code PNG that links to the verification page."""
     settings.qrcodes_dir.mkdir(parents=True, exist_ok=True)
     destination = settings.qrcodes_dir / f"{token}.png"
-    if destination.exists():
-        return destination
-
     image = qrcode.make(verify_url)
     image.save(destination)
     return destination
+
+
+def _qr_cache_bust(verify_url: str) -> str:
+    """Short cache-busting token so browsers reload updated QR images."""
+    return hashlib.sha256(verify_url.encode("utf-8")).hexdigest()[:8]
 
 
 def claim_pdf_path(token: str) -> Path:
@@ -347,6 +350,7 @@ def process_claim(
         message="Claim issued.",
     )
 
+    qr_version = _qr_cache_bust(verify_url)
     return ClaimResult(
         token=token,
         student_name=name,
@@ -355,7 +359,7 @@ def process_claim(
         period=period,
         absence_date=date,
         download_path=f"/student/claim/{token}/download",
-        qr_path=f"/student/claim/{token}/qr.png",
+        qr_path=f"/student/claim/{token}/qr.png?v={qr_version}",
         verify_path=f"/verify/{token}",
     )
 

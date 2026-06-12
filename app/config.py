@@ -36,6 +36,14 @@ def _parse_allowable_codes(raw: str | None) -> tuple[str, ...]:
     return tuple(code.strip() for code in raw.split(",") if code.strip())
 
 
+def _parse_public_base_url(raw: str | None) -> str | None:
+    """Normalize PUBLIC_BASE_URL from .env (trim whitespace and quotes)."""
+    if not raw:
+        return None
+    value = raw.strip().strip('"').strip("'")
+    return value or None
+
+
 @dataclass(frozen=True)
 class Settings:
     """Runtime settings for the classroom server."""
@@ -81,7 +89,9 @@ class Settings:
         return self.data_dir / "claims"
 
     public_base_url: str | None = field(
-        default_factory=lambda: os.getenv("PUBLIC_BASE_URL") or None
+        default_factory=lambda: _parse_public_base_url(
+            os.getenv("PUBLIC_BASE_URL")
+        )
     )
 
     def ensure_directories(self) -> None:
