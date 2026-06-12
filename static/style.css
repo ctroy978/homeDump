@@ -323,7 +323,57 @@ main {
   font-size: 0.9rem;
 }
 
-.claim-note {
+.claim-button,
+.download-button {
+  display: inline-block;
   margin-top: 0.5rem;
-  font-style: italic;
+  padding: 0.5rem 0.9rem;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.claim-result {
+  margin-top: 0.75rem;
+}
+
+.claim-assets {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 180px 1fr;
+  align-items: start;
+  margin-top: 0.75rem;
+}
+
+.claim-qr img {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+}
+
+.verify-details {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  gap: 0.5rem 1rem;
+  margin: 1rem 0 0;
+}
+
+.verify-details dt {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.verify-details dd {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .claim-assets {
+    grid-template-columns: 1fr;
+  }
 }

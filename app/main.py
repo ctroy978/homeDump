@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import settings
 from app.database import get_db, init_schema, list_tables
 from app.routers import admin, dev, student
+from app.services.claims import get_claim_by_token
 from app.services.student_lookup import list_periods_with_assignments
 
 TEMPLATES_DIR = settings.project_root / "templates"
@@ -64,6 +65,29 @@ def health_check() -> dict[str, str | list[str]]:
         "tables": tables,
         "missing_tables": missing,
     }
+
+
+@app.get("/verify/{token}", response_class=HTMLResponse)
+def verify_claim(
+    request: Request,
+    token: str,
+    db=Depends(get_db),
+) -> HTMLResponse:
+    """Public verification page encoded in claim QR codes."""
+    claim = get_claim_by_token(db, token)
+    if claim is None:
+        return templates.TemplateResponse(
+            request=request,
+            name="verify.html",
+            context={"found": False, "token": token.strip().upper()},
+            status_code=404,
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="verify.html",
+        context={"found": True, "claim": claim},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)

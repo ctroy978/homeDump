@@ -76,6 +76,14 @@ class Settings:
     def qrcodes_dir(self) -> Path:
         return self.data_dir / "qrcodes"
 
+    @property
+    def claims_dir(self) -> Path:
+        return self.data_dir / "claims"
+
+    public_base_url: str | None = field(
+        default_factory=lambda: os.getenv("PUBLIC_BASE_URL") or None
+    )
+
     def ensure_directories(self) -> None:
         """Create data directories if they do not exist yet."""
         for path in (
@@ -83,6 +91,7 @@ class Settings:
             self.attendance_upload_dir,
             self.assignments_dir,
             self.qrcodes_dir,
+            self.claims_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 

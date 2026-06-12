@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS claim_tokens (
     token TEXT NOT NULL UNIQUE,
     student_id INTEGER NOT NULL REFERENCES students(id),
     assignment_id INTEGER NOT NULL REFERENCES assignments(id),
+    period INTEGER NOT NULL CHECK (period BETWEEN 0 AND 7),
     absence_date TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -113,6 +114,10 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         WHERE sis_number IS NOT NULL
         """
     )
+
+    claim_columns = _table_columns(conn, "claim_tokens")
+    if "period" not in claim_columns:
+        conn.execute("ALTER TABLE claim_tokens ADD COLUMN period INTEGER")
 
     conn.execute(
         """

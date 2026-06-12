@@ -90,6 +90,36 @@ export that currently contains them.
 
    Expected: one row — `2025-09-02|3|Unexcused Absence`
 
+## Verify Phase 6 (claim flow)
+
+1. **Prerequisites** — complete the Phase 5 flow until homework appears for a
+   qualifying student.
+
+2. **Claim homework** — click **Get my copy** on an assignment card. You should
+   see:
+   - A unique 8-character code
+   - A QR code image
+   - A **Download watermarked PDF** link
+
+3. **Download** — open the PDF and confirm it contains a watermark with the
+   student name, code, period, date, and assignment title.
+
+4. **Verify QR** — scan the QR code (or open the `/verify/{code}` URL). The page
+   should show the registered student, assignment, period, and absence date.
+
+5. **Set `PUBLIC_BASE_URL` in `.env`** on the classroom server so QR codes use
+   the address students actually browse to (not `0.0.0.0`):
+
+   ```
+   PUBLIC_BASE_URL=http://192.168.1.42:8000
+   ```
+
+6. **Run automated tests:**
+
+   ```bash
+   uv run pytest tests/test_claims.py -v
+   ```
+
 ## Verify Phase 5 (student form)
 
 1. **Prerequisites** — attendance uploaded (Phase 2) and at least one assignment
@@ -222,10 +252,10 @@ Copy `.env.example` to `.env` and edit as needed:
 | 3 | **Done** | Eligibility engine and tests |
 | 4 | **Done** | Password-protected admin and assignment uploads |
 | 5 | **Done** | Student form with HTMX dropdowns |
-| 6 | **Current** | Claim flow, QR codes, PDF watermarking |
-| 7 | Planned | Claim logs, backup script, deployment polish |
+| 6 | **Done** | Claim flow, QR codes, PDF watermarking |
+| 7 | **Current** | Claim logs, backup script, deployment polish |
 
-**Current focus: Phase 6** — claim flow with unique codes, QR codes, and watermarked PDF downloads.
+**Current focus: Phase 7** — teacher claim log review, backup script, deployment polish.
 
 After testing each phase, say **"build Phase N"** to continue.
 

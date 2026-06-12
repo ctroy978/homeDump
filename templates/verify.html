@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block title %}Verify Claim{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Claim verification</h2>
+
+  {% if found %}
+  <p class="status-note success">This claim is registered in the classroom system.</p>
+  <dl class="verify-details">
+    <dt>Code</dt>
+    <dd><strong>{{ claim.token }}</strong></dd>
+    <dt>Student</dt>
+    <dd>{{ claim.student_name }}</dd>
+    <dt>Assignment</dt>
+    <dd>{{ claim.assignment_title }}</dd>
+    <dt>Period</dt>
+    <dd>{{ claim.period }}</dd>
+    <dt>Absence date</dt>
+    <dd>{{ claim.absence_date }}</dd>
+    <dt>Claimed at</dt>
+    <dd>{{ claim.claimed_at }}</dd>
+  </dl>
+  {% else %}
+  <p class="status-note error">
+    No claim found for code <strong>{{ token }}</strong>.
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

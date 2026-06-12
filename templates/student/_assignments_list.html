@@ -4,17 +4,27 @@
     {% if assignments %}
     <ul class="assignment-list">
       {% for item in assignments %}
-      <li class="assignment-card">
-        <h3>{{ item.title }}</h3>
-        {% if item.description %}
-        <p>{{ item.description }}</p>
-        {% endif %}
-        <p class="assignment-meta">
-          Period {{ item.period }} · Assigned {{ item.assigned_date }}
-        </p>
-        <p class="help-text claim-note">
-          Download with a unique code — coming in Phase 6.
-        </p>
+      <li class="assignment-card" id="assignment-{{ item.id }}">
+        <div id="assignment-content-{{ item.id }}">
+          <h3>{{ item.title }}</h3>
+          {% if item.description %}
+          <p>{{ item.description }}</p>
+          {% endif %}
+          <p class="assignment-meta">
+            Period {{ item.period }} · Assigned {{ item.assigned_date }}
+          </p>
+          <button
+            type="button"
+            class="claim-button"
+            hx-post="/student/claim"
+            hx-target="#assignment-content-{{ item.id }}"
+            hx-swap="innerHTML"
+            hx-include="#period, #student, #absence-date"
+            hx-vals='{"assignment_id": "{{ item.id }}"}'
+          >
+            Get my copy
+          </button>
+        </div>
       </li>
       {% endfor %}
     </ul>
