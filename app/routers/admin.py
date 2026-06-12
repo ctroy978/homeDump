@@ -21,6 +21,7 @@ from app.dependencies import (
 )
 from app.services.assignments import create_assignment, delete_assignment, list_assignments
 from app.services.attendance_parser import SUPPORTED_EXTENSIONS, ingest_attendance_file
+from app.services.claim_logs import ClaimLogStatus, list_claim_logs
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(settings.project_root / "templates"))
@@ -195,6 +196,34 @@ async def upload_attendance(
             f"&students={result.students_touched}"
         ),
         status_code=303,
+    )
+
+
+@router.get("/claims", response_class=HTMLResponse)
+def claim_logs_page(
+    request: Request,
+    q: str = "",
+    status: str = "all",
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> HTMLResponse:
+    normalized_status: ClaimLogStatus = (
+        status if status in {"all", "success", "failed"} else "all"
+    )
+    student_query = q.strip() or None
+    logs = list_claim_logs(
+        db,
+        student_query=student_query,
+        status=normalized_status,
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/claim_logs.html",
+        context={
+            "title": "Claim Logs",
+            "logs": logs,
+            "filters": {"q": q, "status": normalized_status},
+        },
     )
 
 

@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block title %}Claim Logs{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Claim logs</h2>
+  <p class="help-text">
+    Every student claim attempt is recorded here — successful downloads and
+    failures. Use this to verify who picked up makeup homework.
+  </p>
+
+  <form class="assignment-filter-form" method="get" action="/admin/claims">
+    <label for="filter-q">Student name</label>
+    <input
+      id="filter-q"
+      name="q"
+      type="search"
+      value="{{ filters.q }}"
+      placeholder="Search by name"
+    >
+
+    <label for="filter-status">Result</label>
+    <select id="filter-status" name="status">
+      <option value="all" {% if filters.status == "all" %}selected{% endif %}>All</option>
+      <option value="success" {% if filters.status == "success" %}selected{% endif %}>Successful</option>
+      <option value="failed" {% if filters.status == "failed" %}selected{% endif %}>Failed</option>
+    </select>
+
+    <div class="filter-actions">
+      <button type="submit">Filter</button>
+      {% if filters.q or filters.status != "all" %}
+      <a href="/admin/claims">Clear</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if logs %}
+  <table class="data-table claim-log-table">
+    <thead>
+      <tr>
+        <th>When</th>
+        <th>Student</th>
+        <th>Assignment</th>
+        <th>Period</th>
+        <th>Absence date</th>
+        <th>Code</th>
+        <th>Result</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in logs %}
+      <tr class="{% if entry.success %}log-success{% else %}log-failed{% endif %}">
+        <td>{{ entry.created_at }}</td>
+        <td>{{ entry.student_name }}</td>
+        <td>
+          {% if entry.assignment_title %}
+          {{ entry.assignment_title }}
+          {% elif entry.assignment_id %}
+          #{{ entry.assignment_id }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        <td>
+          {% if entry.period is not none %}
+          {{ entry.period }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        <td>{{ entry.absence_date or "—" }}</td>
+        <td>
+          {% if entry.token %}
+          <a href="/verify/{{ entry.token }}">{{ entry.token }}</a>
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        <td>
+          {% if entry.success %}
+          <span class="badge badge-success">OK</span>
+          {% else %}
+          <span class="badge badge-failed">Failed</span>
+          {% endif %}
+        </td>
+        <td class="log-message">{{ entry.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="help-text">Showing the {{ logs|length }} most recent entries.</p>
+  {% else %}
+  <p class="help-text">
+    {% if filters.q or filters.status != "all" %}
+    No claim logs match your filters.
+    {% else %}
+    No claims yet. Entries appear when students use the pickup form.
+    {% endif %}
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

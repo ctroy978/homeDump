@@ -299,6 +299,43 @@ main {
   color: #b42318;
 }
 
+.claim-log-table .log-message {
+  max-width: 16rem;
+  white-space: normal;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.badge-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.badge-failed {
+  background: #fef2f2;
+  color: #b42318;
+}
+
+.command-block {
+  margin: 0.75rem 0 0;
+  padding: 0.85rem 1rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+
+.command-block code {
+  white-space: pre-wrap;
+}
+
 .muted-field .help-text {
   margin: 0;
 }

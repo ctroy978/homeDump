@@ -256,9 +256,9 @@ Copy `.env.example` to `.env` and edit as needed:
 | 4 | **Done** | Password-protected admin and assignment uploads |
 | 5 | **Done** | Student form with SIS lookup and HTMX dropdowns |
 | 6 | **Done** | Claim flow, QR codes, PDF watermarking |
-| 7 | **Current** | Claim logs, backup script, deployment polish |
+| 7 | **Done** | Claim log review, backup/restore scripts |
 
-**Current focus: Phase 7** — teacher claim log review, backup script, deployment polish.
+**All planned phases complete.** Say if you want further polish or deployment help.
 
 After testing each phase, say **"build Phase N"** to continue.
 
@@ -290,9 +290,41 @@ After testing each phase, say **"build Phase N"** to continue.
 
 Run `uv run python scripts/build_test_fixture.py` to build a named test fixture from `cleanatt.xlsx`.
 
+## Verify Phase 7 (claim logs and backup)
+
+1. **Claim logs** — log in at `/admin/login`, open **Claim logs**, and confirm
+   student claim attempts appear with success/failure status. Filter by student
+   name or result. Successful codes link to `/verify/{token}`.
+
+2. **Backup to USB** — mount your drive, then:
+
+   ```bash
+   uv run python scripts/backup_data.py /run/media/$USER/YOUR-USB-NAME
+   ```
+
+   The script writes `homedump-data-YYYYMMDD-HHMMSS.tar.gz` to the drive.
+   Typical classroom data is small (database + PDFs) — a USB stick is plenty.
+
+3. **Restore from USB** — stop the server first, then:
+
+   ```bash
+   uv run python scripts/restore_data.py /path/to/homedump-data-....tar.gz --yes
+   uv run main
+   ```
+
+   Your previous `data/` folder is moved to `data.before-restore-...` automatically.
+
+4. **Run automated tests:**
+
+   ```bash
+   uv run pytest tests/test_claim_logs.py tests/test_data_backup.py -v
+   ```
+
 ## Backup (overview)
 
-Back up the entire project folder periodically, especially the `data/` directory which holds the database, attendance uploads, and assignment PDFs. A backup script will be added in Phase 7.
+Back up the `data/` directory regularly. Use `scripts/backup_data.py` to write a
+compressed archive to a USB drive or other folder. Archives contain classroom
+data only — not `.env` secrets. Use `scripts/restore_data.py` to recover.
 
 ## Common commands
 
@@ -302,4 +334,6 @@ uv run main                                      # Start the classroom server
 uv add <package>                                 # Add a dependency
 uv add --dev pytest                              # Add a dev dependency (Phase 3+)
 uv run pytest                                    # Run tests (Phase 3+)
+uv run python scripts/backup_data.py /path/to/usb
+uv run python scripts/restore_data.py /path/to/backup.tar.gz --yes
 ```

@@ -59,6 +59,25 @@
     <li><a href="/admin/attendance">Upload attendance report</a></li>
     <li><a href="/admin/assignments/new">Add new assignment</a></li>
     <li><a href="/admin/assignments">View all assignments</a></li>
+    <li><a href="/admin/claims">Review claim logs</a></li>
   </ul>
+</section>
+
+<section class="card">
+  <h2>Backup and restore</h2>
+  <p>
+    Back up the classroom data folder to a USB drive. Archives contain the
+    database, attendance uploads, assignment PDFs, and claimed homework — not
+    your <code>.env</code> password.
+  </p>
+  <p class="help-text">
+    Stop the server before restoring. Restore moves your current <code>data/</code>
+    folder aside automatically, then unpacks the backup.
+  </p>
+  <pre class="command-block"><code># Backup to a USB drive (change the path to your drive)
+uv run python scripts/backup_data.py /run/media/$USER/USB
+
+# Restore from a backup archive
+uv run python scripts/restore_data.py /run/media/$USER/USB/homedump-data-YYYYMMDD-HHMMSS.tar.gz --yes</code></pre>
 </section>
 {% endblock %}
