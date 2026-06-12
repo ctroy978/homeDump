@@ -237,6 +237,7 @@ Copy `.env.example` to `.env` and edit as needed:
 
 | Variable | Purpose |
 |----------|---------|
+| `PUBLIC_BASE_URL` | **Required for go-live** — classroom IP or hostname for student links and QR codes |
 | `ADMIN_PASSWORD` | Teacher admin login (Phase 4+) |
 | `SECRET_KEY` | Signs admin session cookies |
 | `HOST` / `PORT` | Server bind address |
