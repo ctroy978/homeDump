@@ -22,7 +22,7 @@ class AssignmentOption:
 def list_periods_with_assignments(conn: sqlite3.Connection) -> list[int]:
     """Return class periods that have at least one uploaded assignment."""
     rows = conn.execute(
-        "SELECT DISTINCT period FROM assignments ORDER BY period"
+        "SELECT DISTINCT period FROM assignment_periods ORDER BY period"
     ).fetchall()
     return [int(row["period"]) for row in rows]
 
@@ -39,8 +39,9 @@ def list_eligible_students(conn: sqlite3.Connection, period: int) -> list[str]:
         SELECT DISTINCT s.name, ar.absence_code
         FROM students s
         JOIN attendance_records ar ON ar.student_id = s.id
-        JOIN assignments a
-            ON a.period = ar.period AND a.assigned_date = ar.absence_date
+        JOIN assignments a ON a.assigned_date = ar.absence_date
+        JOIN assignment_periods ap
+            ON ap.assignment_id = a.id AND ap.period = ar.period
         WHERE ar.period = ?
         ORDER BY s.name
         """,
@@ -75,8 +76,9 @@ def list_eligible_dates(
         SELECT DISTINCT ar.absence_date, ar.absence_code
         FROM attendance_records ar
         JOIN students s ON s.id = ar.student_id
-        JOIN assignments a
-            ON a.period = ar.period AND a.assigned_date = ar.absence_date
+        JOIN assignments a ON a.assigned_date = ar.absence_date
+        JOIN assignment_periods ap
+            ON ap.assignment_id = a.id AND ap.period = ar.period
         WHERE ar.period = ? AND s.name = ?
         ORDER BY ar.absence_date DESC
         """,
@@ -107,10 +109,11 @@ def list_eligible_assignments(
 
     rows = conn.execute(
         """
-        SELECT id, title, description, assigned_date, period
-        FROM assignments
-        WHERE period = ? AND assigned_date = ?
-        ORDER BY title, id
+        SELECT a.id, a.title, a.description, a.assigned_date, ap.period
+        FROM assignments a
+        JOIN assignment_periods ap ON ap.assignment_id = a.id
+        WHERE ap.period = ? AND a.assigned_date = ?
+        ORDER BY a.title, a.id
         """,
         (period, date),
     ).fetchall()

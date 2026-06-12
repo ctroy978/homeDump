@@ -185,6 +185,89 @@ main {
   resize: vertical;
 }
 
+.period-picker {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  margin: 0;
+}
+
+.period-picker legend {
+  font-weight: 600;
+  padding: 0 0.25rem;
+}
+
+.period-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.period-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 500;
+}
+
+.assignment-filter-form {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 520px;
+  margin: 1rem 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.assignment-filter-form label {
+  font-weight: 600;
+}
+
+.assignment-filter-form input {
+  font: inherit;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.25rem;
+}
+
+.filter-actions button {
+  padding: 0.45rem 0.9rem;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  font: inherit;
+  cursor: pointer;
+}
+
+.inline-delete-form {
+  margin: 0;
+}
+
+.danger-button {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font: inherit;
+  cursor: pointer;
+}
+
+.danger-button:hover {
+  background: #fee2e2;
+}
+
 .student-form {
   display: grid;
   gap: 1rem;

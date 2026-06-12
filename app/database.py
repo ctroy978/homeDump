@@ -39,12 +39,17 @@ CREATE TABLE IF NOT EXISTS attendance_records (
 
 CREATE TABLE IF NOT EXISTS assignments (
     id INTEGER PRIMARY KEY,
-    period INTEGER NOT NULL CHECK (period BETWEEN 0 AND 7),
     assigned_date TEXT NOT NULL,
     title TEXT NOT NULL,
     description TEXT,
     pdf_filename TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS assignment_periods (
+    assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+    period INTEGER NOT NULL CHECK (period BETWEEN 0 AND 7),
+    PRIMARY KEY (assignment_id, period)
 );
 
 CREATE TABLE IF NOT EXISTS claim_tokens (
@@ -83,17 +88,17 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     return conn
 
 
-def _student_columns(conn: sqlite3.Connection) -> set[str]:
-    rows = conn.execute("PRAGMA table_info(students)").fetchall()
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return {str(row[1]) for row in rows}
 
 
 def _apply_migrations(conn: sqlite3.Connection) -> None:
-    """Add columns introduced after the initial schema."""
-    columns = _student_columns(conn)
-    if "sis_number" not in columns:
+    """Add columns and tables introduced after the initial schema."""
+    student_columns = _table_columns(conn, "students")
+    if "sis_number" not in student_columns:
         conn.execute("ALTER TABLE students ADD COLUMN sis_number TEXT")
-    if "last_attendance_upload_id" not in columns:
+    if "last_attendance_upload_id" not in student_columns:
         conn.execute(
             """
             ALTER TABLE students
@@ -108,6 +113,24 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         WHERE sis_number IS NOT NULL
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS assignment_periods (
+            assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+            period INTEGER NOT NULL CHECK (period BETWEEN 0 AND 7),
+            PRIMARY KEY (assignment_id, period)
+        )
+        """
+    )
+    assignment_columns = _table_columns(conn, "assignments")
+    if "period" in assignment_columns:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO assignment_periods (assignment_id, period)
+            SELECT id, period FROM assignments WHERE period IS NOT NULL
+            """
+        )
 
 
 def init_schema(conn: sqlite3.Connection | None = None) -> None:

@@ -10,36 +10,79 @@
   {% if request.query_params.get('success') %}
   <p class="status-note success">Assignment saved successfully.</p>
   {% endif %}
+  {% if request.query_params.get('deleted') %}
+  <p class="status-note success">Assignment deleted.</p>
+  {% endif %}
 
   <p><a href="/admin/assignments/new">+ Add new assignment</a></p>
+
+  <form class="assignment-filter-form" method="get" action="/admin/assignments">
+    <label for="filter-q">Search title</label>
+    <input
+      id="filter-q"
+      name="q"
+      type="search"
+      value="{{ filters.q }}"
+      placeholder="e.g. aristotle"
+    >
+
+    <label for="filter-date">Assigned date</label>
+    <input id="filter-date" name="date" type="date" value="{{ filters.date }}">
+
+    <div class="filter-actions">
+      <button type="submit">Filter</button>
+      {% if filters.q or filters.date %}
+      <a href="/admin/assignments">Clear</a>
+      {% endif %}
+    </div>
+  </form>
 
   {% if assignments %}
   <table class="data-table">
     <thead>
       <tr>
         <th>ID</th>
-        <th>Period</th>
+        <th>Periods</th>
         <th>Assigned date</th>
         <th>Title</th>
         <th>PDF</th>
         <th>Created</th>
+        <th></th>
       </tr>
     </thead>
     <tbody>
       {% for item in assignments %}
       <tr>
         <td>{{ item.id }}</td>
-        <td>{{ item.period }}</td>
+        <td>{{ item.periods_display }}</td>
         <td>{{ item.assigned_date }}</td>
         <td>{{ item.title }}</td>
         <td>{{ item.pdf_filename }}</td>
         <td>{{ item.created_at }}</td>
+        <td>
+          <form
+            class="inline-delete-form"
+            method="post"
+            action="/admin/assignments/{{ item.id }}/delete"
+            onsubmit="return confirm('Delete &quot;{{ item.title }}&quot;? This cannot be undone.');"
+          >
+            <input type="hidden" name="q" value="{{ filters.q }}">
+            <input type="hidden" name="date" value="{{ filters.date }}">
+            <button type="submit" class="danger-button">Delete</button>
+          </form>
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <p class="help-text">No assignments yet.</p>
+  <p class="help-text">
+    {% if filters.q or filters.date %}
+    No assignments match your filters.
+    {% else %}
+    No assignments yet.
+    {% endif %}
+  </p>
   {% endif %}
 </section>
 {% endblock %}

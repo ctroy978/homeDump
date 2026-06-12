@@ -18,7 +18,7 @@ from app.dependencies import (
     _expected_admin_token,
     require_admin,
 )
-from app.services.assignments import create_assignment
+from app.services.assignments import create_assignment, delete_assignment, list_assignments
 from app.services.attendance_parser import SUPPORTED_EXTENSIONS, ingest_attendance_file
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -194,21 +194,50 @@ async def upload_attendance(
 @router.get("/assignments", response_class=HTMLResponse)
 def assignments_list(
     request: Request,
+    q: str = "",
+    date: str = "",
     _admin: None = Depends(require_admin),
     db=Depends(get_db),
 ) -> HTMLResponse:
-    assignments = db.execute(
-        """
-        SELECT id, period, assigned_date, title, description, pdf_filename, created_at
-        FROM assignments
-        ORDER BY assigned_date DESC, period ASC, id DESC
-        """
-    ).fetchall()
+    title_query = q.strip() or None
+    assigned_date = date.strip() or None
+    assignments = list_assignments(
+        db,
+        title_query=title_query,
+        assigned_date=assigned_date,
+    )
     return templates.TemplateResponse(
         request=request,
         name="admin/assignments_list.html",
-        context={"title": "Assignments", "assignments": assignments},
+        context={
+            "title": "Assignments",
+            "assignments": assignments,
+            "filters": {"q": q, "date": date},
+        },
     )
+
+
+@router.post("/assignments/{assignment_id}/delete")
+def assignment_delete(
+    assignment_id: int,
+    q: str = Form(""),
+    date: str = Form(""),
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> RedirectResponse:
+    try:
+        delete_assignment(db, assignment_id)
+    except ValueError:
+        pass
+
+    params = []
+    if q.strip():
+        params.append(f"q={q.strip()}")
+    if date.strip():
+        params.append(f"date={date.strip()}")
+    params.append("deleted=1")
+    query = "&".join(params)
+    return RedirectResponse(url=f"/admin/assignments?{query}", status_code=303)
 
 
 @router.get("/assignments/new", response_class=HTMLResponse)
@@ -221,7 +250,12 @@ def assignment_new_page(
         name="admin/assignment_new.html",
         context={
             "title": "Add Assignment",
-            "form": {"period": 0, "assigned_date": "", "title": "", "description": ""},
+            "form": {
+                "periods": [],
+                "assigned_date": "",
+                "title": "",
+                "description": "",
+            },
         },
     )
 
@@ -229,7 +263,7 @@ def assignment_new_page(
 @router.post("/assignments/new")
 async def assignment_new_submit(
     request: Request,
-    period: int = Form(...),
+    periods: list[int] = Form(default=[]),
     assigned_date: str = Form(...),
     title: str = Form(...),
     description: str = Form(""),
@@ -238,7 +272,7 @@ async def assignment_new_submit(
     db=Depends(get_db),
 ):
     form = {
-        "period": period,
+        "periods": periods,
         "assigned_date": assigned_date,
         "title": title,
         "description": description,
@@ -250,7 +284,7 @@ async def assignment_new_submit(
             raise ValueError("PDF file is empty.")
         create_assignment(
             db,
-            period=period,
+            periods=periods,
             assigned_date=assigned_date,
             title=title,
             description=description.strip() or None,

@@ -9,7 +9,8 @@
   <h2>Add assignment</h2>
   <p>
     Students can claim this homework when they had an allowable absence on the
-    <strong>assigned date</strong> in the matching <strong>period</strong>.
+    <strong>assigned date</strong> in one of the selected <strong>periods</strong>.
+    Select every class that received the same assignment — you only upload the PDF once.
   </p>
 
   {% if error %}
@@ -17,12 +18,23 @@
   {% endif %}
 
   <form class="upload-form assignment-form" action="/admin/assignments/new" method="post" enctype="multipart/form-data">
-    <label for="period">Period</label>
-    <select id="period" name="period" required>
-      {% for p in range(8) %}
-      <option value="{{ p }}" {% if form.period == p %}selected{% endif %}>Period {{ p }}</option>
-      {% endfor %}
-    </select>
+    <fieldset class="period-picker">
+      <legend>Class periods</legend>
+      <p class="help-text">Check each period that gets this assignment.</p>
+      <div class="period-checkboxes">
+        {% for p in range(8) %}
+        <label class="period-checkbox">
+          <input
+            type="checkbox"
+            name="periods"
+            value="{{ p }}"
+            {% if p in form.periods %}checked{% endif %}
+          >
+          Period {{ p }}
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
 
     <label for="assigned_date">Assigned date</label>
     <input id="assigned_date" name="assigned_date" type="date" value="{{ form.assigned_date }}" required>
