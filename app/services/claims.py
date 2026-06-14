@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 
+import fitz
 import qrcode
 from PIL import Image, ImageDraw
 from pypdf import PdfReader, PdfWriter
@@ -169,6 +170,29 @@ def _build_qr_overlay_page(
     return buffer.getvalue()
 
 
+def _flatten_pdf_for_printing(pdf_bytes: bytes, *, dpi: int = 200) -> bytes:
+    """
+    Rasterize each page so worksheet, watermark, and QR print as one layer.
+
+    Physical printers often skip underlying PDF content when transparent overlays
+    are merged on top. Flattening composites everything into a single opaque page.
+    """
+    source = fitz.open(stream=pdf_bytes, filetype="pdf")
+    flattened = fitz.open()
+    try:
+        for page in source:
+            pixmap = page.get_pixmap(dpi=dpi, alpha=False)
+            new_page = flattened.new_page(
+                width=page.rect.width,
+                height=page.rect.height,
+            )
+            new_page.insert_image(new_page.rect, pixmap=pixmap)
+        return flattened.tobytes()
+    finally:
+        source.close()
+        flattened.close()
+
+
 def watermark_pdf(
     source: Path,
     destination: Path,
@@ -199,9 +223,12 @@ def watermark_pdf(
             page.merge_page(qr_page)
         writer.add_page(page)
 
+    buffer = BytesIO()
+    writer.write(buffer)
+
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("wb") as handle:
-        writer.write(handle)
+        handle.write(_flatten_pdf_for_printing(buffer.getvalue()))
 
 
 def generate_qr_image(token: str, verify_url: str) -> Path:

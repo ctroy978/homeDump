@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 
 from app import config
 from app.database import init_schema
@@ -87,6 +87,41 @@ def _seed_assignment(conn: sqlite3.Connection, test_settings: types.SimpleNamesp
         pdf_bytes=_blank_pdf_bytes(),
         original_filename="week1.pdf",
     )
+
+
+def _page_image_has_transparency(page: object) -> bool:
+    resources = page.get("/Resources")
+    if resources is None:
+        return False
+    xobjects = resources.get("/XObject")
+    if xobjects is None:
+        return False
+    for xobject in xobjects.values():
+        image = xobject.get_object()
+        if image.get("/SMaskInData") or image.get("/SMask"):
+            return True
+    return False
+
+
+def test_watermarked_pdf_is_flattened_for_printing(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, test_settings = claim_env
+    assignment_id = _seed_assignment(conn, test_settings)
+
+    result = process_claim(
+        conn,
+        sis_number="10001",
+        assignment_id=assignment_id,
+        period=0,
+        absence_date="2025-09-29",
+        public_base_url="http://classroom.test:8000",
+    )
+
+    reader = PdfReader(str(claim_pdf_path(result.token)))
+    assert len(reader.pages) >= 1
+    for page in reader.pages:
+        assert not _page_image_has_transparency(page)
 
 
 def test_process_claim_issues_token_and_assets(
