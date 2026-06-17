@@ -124,16 +124,55 @@ def _decode_text(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def _split_header_fields(line: str, delimiter: str) -> list[str]:
+    """Split one export line into trimmed field names."""
+    return [field.strip() for field in line.split(delimiter)]
+
+
+def _is_attendance_header(fields: list[str]) -> bool:
+    """
+    Return True when a line looks like the attendance table header.
+
+    Requires Student Name, Date, and at least one Period 0-7 column so preamble
+    rows (school name, report title, etc.) are ignored.
+    """
+    if len(fields) < 3:
+        return False
+
+    lowered = {field.lower() for field in fields if field}
+    if "student name" not in lowered or "date" not in lowered:
+        return False
+
+    return any(PERIOD_HEADER_RE.match(field) for field in fields if field)
+
+
+def find_header_row_index(text: str, delimiter: str) -> int | None:
+    """Return the zero-based line index of the attendance header row, if found."""
+    for index, line in enumerate(text.splitlines()):
+        if not line.strip():
+            continue
+        fields = _split_header_fields(line, delimiter)
+        if _is_attendance_header(fields):
+            return index
+    return None
+
+
 def _detect_delimiter(text: str, suffix: str) -> str:
     """
     Guess the field delimiter for a text attendance export.
 
     Real-world exports from the sample system's .txt reports are tab-delimited.
+    When the file has preamble lines, scan for the row that contains the
+    attendance headers instead of assuming the first line is the header.
     """
     if suffix == ".csv":
         return ","
     if suffix == ".tsv":
         return "\t"
+
+    for delimiter in ("\t", ","):
+        if find_header_row_index(text, delimiter) is not None:
+            return delimiter
 
     header = next((line for line in text.splitlines() if line.strip()), "")
     if not header:
@@ -148,7 +187,20 @@ def _load_text_export(path: Path) -> pd.DataFrame:
     """Read a tab- or comma-delimited attendance text export."""
     text = _decode_text(path.read_bytes())
     delimiter = _detect_delimiter(text, path.suffix.lower())
-    df = pd.read_csv(StringIO(text), sep=delimiter)
+    header_row = find_header_row_index(text, delimiter)
+    if header_row is None:
+        raise ValueError(
+            "Could not find attendance header row. The file must include "
+            "columns named 'Student Name', 'Date', and at least one 'Period 0'–'Period 7'."
+        )
+
+    # Keep blank preamble lines so the detected header index matches pandas.
+    df = pd.read_csv(
+        StringIO(text),
+        sep=delimiter,
+        header=header_row,
+        skip_blank_lines=False,
+    )
     return df
 
 

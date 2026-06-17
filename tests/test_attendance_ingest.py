@@ -8,7 +8,12 @@ from pathlib import Path
 import pandas as pd
 
 from app.database import init_schema
-from app.services.attendance_parser import ingest_attendance_file, upsert_student
+from app.services.attendance_parser import (
+    find_header_row_index,
+    ingest_attendance_file,
+    load_attendance_dataframe,
+    upsert_student,
+)
 
 
 def _write_fixture(path: Path, rows: list[dict[str, object]]) -> None:
@@ -361,3 +366,91 @@ def test_student_with_no_codes_still_clears_old_records(tmp_path: Path) -> None:
     result = ingest_attendance_file(conn, empty_export, empty_export.name)
     assert result.records_cleared == 1
     assert _count_records(conn, "Alice Example") == 0
+
+
+def test_find_header_row_skips_preamble_lines() -> None:
+    text = (
+        "School Attendance Report\n"
+        "Period 3 - Room 204\n"
+        "\n"
+        "Generated: 2025-09-15\n"
+        "Student Name\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\tPeriod 3\t"
+        "Period 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Alice Example\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+    )
+    assert find_header_row_index(text, "\t") == 4
+
+
+def test_text_export_with_preamble_parses_correctly(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_schema(conn)
+
+    export = tmp_path / "period3_with_preamble.txt"
+    export.write_text(
+        "Jefferson High School\n"
+        "Attendance Detail - Year to Date\n"
+        "Teacher: Example Teacher | Period 3\n"
+        "\n"
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Alice Example\t1001\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+
+    assert result.students_touched == 1
+    assert result.records_upserted == 1
+    assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Illness"
+
+    row = conn.execute(
+        "SELECT sis_number FROM students WHERE name = ?",
+        ("Alice Example",),
+    ).fetchone()
+    assert row["sis_number"] == "1001"
+
+
+def test_plain_header_export_still_parses(tmp_path: Path) -> None:
+    export = tmp_path / "plain.txt"
+    _write_fixture(
+        export,
+        [
+            {
+                "Student Name": "Alice Example",
+                "Grade": 10,
+                "Date": "2025-09-02",
+                "Period 0": "",
+                "Period 1": "",
+                "Period 2": "",
+                "Period 3": "Illness",
+                "Period 4": "",
+                "Period 5": "",
+                "Period 6": "",
+                "Period 7": "",
+                "Note": "",
+            }
+        ],
+    )
+
+    df = load_attendance_dataframe(export)
+    assert find_header_row_index(export.read_text(encoding="utf-8"), "\t") == 0
+    assert list(df.columns)[:3] == ["Student Name", "Grade", "Date"]
+    assert len(df) == 1
+
+
+def test_missing_header_row_raises_clear_error(tmp_path: Path) -> None:
+    export = tmp_path / "no_header.txt"
+    export.write_text(
+        "School Attendance Report\n"
+        "Generated: 2025-09-15\n"
+        "Alice Example\t10\t2025-09-02\tIllness\n",
+        encoding="utf-8",
+    )
+
+    try:
+        load_attendance_dataframe(export)
+    except ValueError as exc:
+        assert "Could not find attendance header row" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for missing header row")
