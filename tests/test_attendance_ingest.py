@@ -439,6 +439,28 @@ def test_plain_header_export_still_parses(tmp_path: Path) -> None:
     assert len(df) == 1
 
 
+def test_quoted_column_headers_from_live_export(tmp_path: Path) -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    init_schema(conn)
+
+    export = tmp_path / "live_format.txt"
+    export.write_text(
+        'School Name\tSchool Year\t"Student Name"\t"Legal Formatted Name"\t'
+        '"Sis Number"\t"Grade"\tDate\tPeriod 0\tPeriod 1\tPeriod 2\tPeriod 3\t'
+        'Period 4\tPeriod 5\tPeriod 6\tPeriod 7\t"Note"\n'
+        "Coquille Jr/Sr High School\t2025-2026\tJane Doe\tDOE, JANE\t"
+        "12345\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+
+    assert result.students_touched == 1
+    assert result.records_upserted == 1
+    assert _record_code(conn, "Jane Doe", "2025-09-02", 3) == "Illness"
+
+
 def test_missing_header_row_raises_clear_error(tmp_path: Path) -> None:
     export = tmp_path / "no_header.txt"
     export.write_text(

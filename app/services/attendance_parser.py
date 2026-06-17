@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import re
 import sqlite3
 from dataclasses import dataclass, field
@@ -88,11 +89,20 @@ def _normalize_code(value: object) -> str | None:
     return text or None
 
 
+def _normalize_column_label(value: object) -> str:
+    """Strip whitespace and surrounding quotes from export column labels."""
+    text = str(value).strip()
+    if len(text) >= 2 and text[0] == text[-1] == '"':
+        text = text[1:-1].strip()
+    return text
+
+
 def _find_period_columns(columns: list[str]) -> dict[str, int]:
     """Map column header -> period number (0-7)."""
     period_columns: dict[str, int] = {}
     for column in columns:
-        match = PERIOD_HEADER_RE.match(str(column).strip())
+        label = _normalize_column_label(column)
+        match = PERIOD_HEADER_RE.match(label)
         if match:
             period_columns[column] = int(match.group(1))
     return period_columns
@@ -100,7 +110,7 @@ def _find_period_columns(columns: list[str]) -> dict[str, int]:
 
 def _require_column(columns: list[str], name: str) -> str:
     """Return the actual column label matching name (case-insensitive)."""
-    lowered = {str(col).strip().lower(): col for col in columns}
+    lowered = {_normalize_column_label(col).lower(): col for col in columns}
     key = name.strip().lower()
     if key not in lowered:
         raise ValueError(f"Missing required column: {name}")
@@ -108,8 +118,9 @@ def _require_column(columns: list[str], name: str) -> str:
 
 
 def _optional_column(columns: list[str], name: str) -> str | None:
+    target = name.lower()
     for column in columns:
-        if str(column).strip().lower() == name.lower():
+        if _normalize_column_label(column).lower() == target:
             return str(column)
     return None
 
@@ -125,8 +136,9 @@ def _decode_text(raw: bytes) -> str:
 
 
 def _split_header_fields(line: str, delimiter: str) -> list[str]:
-    """Split one export line into trimmed field names."""
-    return [field.strip() for field in line.split(delimiter)]
+    """Split one export line into normalized field names."""
+    row = next(csv.reader([line], delimiter=delimiter))
+    return [_normalize_column_label(field) for field in row]
 
 
 def _is_attendance_header(fields: list[str]) -> bool:
@@ -215,7 +227,7 @@ def load_attendance_dataframe(path: Path) -> pd.DataFrame:
         supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
         raise ValueError(f"Unsupported file type '{suffix}'. Use one of: {supported}")
 
-    df.columns = [str(col).strip() for col in df.columns]
+    df.columns = [_normalize_column_label(col) for col in df.columns]
     if not df.empty:
         df = df.dropna(how="all")
     return df
