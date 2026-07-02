@@ -159,7 +159,9 @@ def _build_qr_overlay_page(
 
     overlay = Image.new("RGBA", (int(width), int(height)), (255, 255, 255, 0))
     x = int(width) - qr_size - margin
-    y = margin
+    # PDF page coordinates are in points at 72 points per inch.
+    # Keep the QR in the top-right, but drop it down another 0.5 inch.
+    y = margin + 36
     overlay.paste(qr_img, (x, y), qr_img)
 
     draw = ImageDraw.Draw(overlay)
