@@ -21,13 +21,16 @@ class AssignmentRow:
     pdf_filename: str
     created_at: str
     periods: list[int]
+    source: str = "manual"
+    github_repo: str | None = None
+    github_path: str | None = None
 
     @property
     def periods_display(self) -> str:
         return format_period_list(self.periods)
 
 
-def _validate_periods(periods: list[int]) -> list[int]:
+def validate_periods(periods: list[int]) -> list[int]:
     if not periods:
         raise ValueError("Select at least one class period.")
     unique = sorted({int(period) for period in periods})
@@ -51,7 +54,7 @@ def create_assignment(
 
     Returns the new assignment id.
     """
-    period_list = _validate_periods(periods)
+    period_list = validate_periods(periods)
 
     assigned_date = assigned_date.strip()
     title = title.strip()
@@ -88,6 +91,119 @@ def create_assignment(
     return assignment_id
 
 
+def find_github_assignment(
+    conn: sqlite3.Connection,
+    github_repo: str,
+    github_path: str,
+    assigned_date: str,
+) -> int | None:
+    row = conn.execute(
+        """
+        SELECT id FROM assignments
+        WHERE source = 'github'
+          AND github_repo = ?
+          AND github_path = ?
+          AND assigned_date = ?
+        """,
+        (github_repo, github_path, assigned_date),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def create_github_assignment(
+    conn: sqlite3.Connection,
+    *,
+    periods: list[int],
+    assigned_date: str,
+    title: str,
+    github_repo: str,
+    github_path: str,
+    pdf_filename: str,
+) -> int:
+    """
+    Insert a GitHub-sourced assignment and period links without committing.
+
+    Does not write original.pdf — the caller writes post-commit.
+    """
+    period_list = validate_periods(periods)
+    title = title.strip()
+    if not title:
+        raise ValueError("Title is required.")
+
+    cursor = conn.execute(
+        """
+        INSERT INTO assignments (
+            assigned_date, title, description, pdf_filename,
+            source, github_repo, github_path
+        )
+        VALUES (?, ?, NULL, ?, 'github', ?, ?)
+        """,
+        (assigned_date, title, pdf_filename, github_repo, github_path),
+    )
+    assignment_id = int(cursor.lastrowid)
+
+    conn.executemany(
+        """
+        INSERT INTO assignment_periods (assignment_id, period)
+        VALUES (?, ?)
+        """,
+        [(assignment_id, period) for period in period_list],
+    )
+    return assignment_id
+
+
+def _assignment_periods(
+    conn: sqlite3.Connection,
+    assignment_id: int,
+) -> set[int]:
+    rows = conn.execute(
+        """
+        SELECT period
+        FROM assignment_periods
+        WHERE assignment_id = ?
+        """,
+        (assignment_id,),
+    ).fetchall()
+    return {int(row["period"]) for row in rows}
+
+
+def add_periods_to_assignment(
+    conn: sqlite3.Connection,
+    assignment_id: int,
+    periods: list[int],
+) -> tuple[list[int], list[int]]:
+    """Add periods to an assignment without committing. Returns (added, skipped)."""
+    period_list = validate_periods(periods)
+    existing = _assignment_periods(conn, assignment_id)
+    added: list[int] = []
+    skipped: list[int] = []
+
+    for period in period_list:
+        if period in existing:
+            skipped.append(period)
+            continue
+        conn.execute(
+            """
+            INSERT INTO assignment_periods (assignment_id, period)
+            VALUES (?, ?)
+            """,
+            (assignment_id, period),
+        )
+        existing.add(period)
+        added.append(period)
+
+    return added, skipped
+
+
+def write_assignment_pdf(assignment_id: int, pdf_bytes: bytes) -> Path:
+    """Write original.pdf after a successful commit."""
+    assignment_dir = settings.assignments_dir / str(assignment_id)
+    assignment_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = assignment_dir / "original.pdf"
+    pdf_path.write_bytes(pdf_bytes)
+    return pdf_path
+
+
 def format_period_list(periods: list[int]) -> str:
     """Format period integers for display, e.g. ``[1, 3, 5]`` -> ``1, 3, 5``."""
     return ", ".join(str(period) for period in sorted(periods))
@@ -121,6 +237,9 @@ def list_assignments(
             a.description,
             a.pdf_filename,
             a.created_at,
+            a.source,
+            a.github_repo,
+            a.github_path,
             GROUP_CONCAT(ap.period) AS periods
         FROM assignments a
         LEFT JOIN assignment_periods ap ON ap.assignment_id = a.id
@@ -147,6 +266,9 @@ def list_assignments(
                 pdf_filename=str(row["pdf_filename"]),
                 created_at=str(row["created_at"]),
                 periods=period_values,
+                source=str(row["source"] or "manual"),
+                github_repo=row["github_repo"],
+                github_path=row["github_path"],
             )
         )
     return results
@@ -164,6 +286,10 @@ def delete_assignment(conn: sqlite3.Connection, assignment_id: int) -> None:
     conn.execute("DELETE FROM claim_tokens WHERE assignment_id = ?", (assignment_id,))
     conn.execute(
         "UPDATE claim_logs SET assignment_id = NULL WHERE assignment_id = ?",
+        (assignment_id,),
+    )
+    conn.execute(
+        "UPDATE distribution_events SET assignment_id = NULL WHERE assignment_id = ?",
         (assignment_id,),
     )
     conn.execute("DELETE FROM assignments WHERE id = ?", (assignment_id,))

@@ -155,6 +155,46 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         """
     )
 
+    assignment_columns = _table_columns(conn, "assignments")
+    if "source" not in assignment_columns:
+        conn.execute(
+            "ALTER TABLE assignments ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'"
+        )
+    if "github_repo" not in assignment_columns:
+        conn.execute("ALTER TABLE assignments ADD COLUMN github_repo TEXT")
+    if "github_path" not in assignment_columns:
+        conn.execute("ALTER TABLE assignments ADD COLUMN github_path TEXT")
+
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_assignments_github_identity
+        ON assignments (github_repo, github_path, assigned_date)
+        WHERE source = 'github' AND github_repo IS NOT NULL
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS distribution_events (
+            id INTEGER PRIMARY KEY,
+            scanned_at TEXT NOT NULL DEFAULT (datetime('now')),
+            assigned_date TEXT NOT NULL,
+            github_repo TEXT NOT NULL,
+            github_path TEXT NOT NULL,
+            display_title TEXT NOT NULL,
+            periods_requested TEXT NOT NULL,
+            periods_added TEXT NOT NULL,
+            periods_skipped TEXT NOT NULL,
+            assignment_id INTEGER REFERENCES assignments(id),
+            outcome TEXT NOT NULL CHECK (outcome IN (
+                'success', 'partial', 'all_duplicate', 'failure'
+            )),
+            error_message TEXT,
+            client_ip TEXT
+        )
+        """
+    )
+
 
 def init_schema(conn: sqlite3.Connection | None = None) -> None:
     """

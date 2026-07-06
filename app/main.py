@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -12,12 +13,13 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import get_db, init_schema, list_tables
-from app.routers import admin, dev, student
+from app.routers import admin, dev, distribution, student
 from app.services.claims import get_claim_by_token
 from app.services.student_lookup import list_periods_with_assignments
 
 TEMPLATES_DIR = settings.project_root / "templates"
 STATIC_DIR = settings.project_root / "static"
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -25,6 +27,10 @@ async def lifespan(app: FastAPI):
     """Run startup tasks before serving requests."""
     settings.ensure_directories()
     init_schema()
+    if not settings.github_enabled:
+        logger.info("GitHub distribution disabled (GITHUB_TOKEN not set).")
+    elif not settings.scan_enabled:
+        logger.info("Distribution scan disabled (SCAN_PIN not set).")
     yield
 
 
@@ -41,6 +47,7 @@ if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 app.include_router(admin.router)
+app.include_router(distribution.router)
 app.include_router(student.router)
 app.include_router(dev.router)
 
@@ -57,6 +64,7 @@ def health_check() -> dict[str, str | list[str]]:
         "claim_tokens",
         "claim_logs",
         "print_queue",
+        "distribution_events",
     }
     missing = sorted(expected - set(tables))
 

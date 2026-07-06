@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Register worksheet distribution</h2>
+  <p class="help-text">
+    Today becomes the assigned date for <strong>{{ display_title }}</strong>.
+  </p>
+  <p class="assignment-meta">{{ repo }} / {{ path }}</p>
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+
+  <form class="upload-form" action="/admin/distribute" method="post">
+    <input type="hidden" name="repo" value="{{ repo }}">
+    <input type="hidden" name="path" value="{{ path }}">
+
+    <fieldset class="period-picker">
+      <legend>Which periods received this worksheet today?</legend>
+      <div class="period-checkboxes">
+        {% for period in periods %}
+        <label class="period-checkbox">
+          <input type="checkbox" name="periods" value="{{ period }}">
+          Period {{ period }}
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+
+    <button type="submit">Register distribution</button>
+  </form>
+</section>
+{% endblock %}

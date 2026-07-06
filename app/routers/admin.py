@@ -42,6 +42,15 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(settings.project_root / "templates"))
 
 
+def _github_enabled_for_templates() -> bool:
+    from app.config import settings as current_settings
+
+    return current_settings.github_enabled
+
+
+templates.env.globals["github_enabled"] = _github_enabled_for_templates
+
+
 def _safe_next_path(next_path: str | None) -> str:
     if not next_path or not next_path.startswith("/admin"):
         return "/admin"

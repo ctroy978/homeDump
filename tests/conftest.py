@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-from app.database import init_schema
+from app.database import get_db, init_schema
+from app.main import app
 from app.services.attendance_parser import upsert_student
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -18,7 +21,7 @@ FIXTURE_XLSX = PROJECT_ROOT / "tests" / "fixtures" / "named_attendance.xlsx"
 @pytest.fixture
 def db_conn() -> sqlite3.Connection:
     """In-memory database with representative attendance rows for eligibility tests."""
-    conn = sqlite3.connect(":memory:")
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     init_schema(conn)
@@ -46,6 +49,19 @@ def db_conn() -> sqlite3.Connection:
     conn.commit()
     yield conn
     conn.close()
+
+
+@pytest.fixture
+def client(db_conn: sqlite3.Connection) -> Generator[TestClient, None, None]:
+    """FastAPI test client backed by the in-memory db_conn fixture."""
+
+    def override_get_db() -> Generator[sqlite3.Connection, None, None]:
+        yield db_conn
+
+    app.dependency_overrides[get_db] = override_get_db
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
 
 
 @pytest.fixture

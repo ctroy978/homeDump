@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block head %}
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>GitHub worksheets</h2>
+  <p>
+    Browse PDF worksheets from your <code>scope_*</code> repos, then download a
+    print packet: cover sheet with install QR plus the worksheet from
+    <code>main</code>.
+  </p>
+  <p class="help-text">
+    Scan the cover QR on distribution day to register the assignment. Manual
+    PDF upload remains available under Assignments.
+  </p>
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+
+  {% if not repos %}
+  <p class="status-note error">
+    No worksheet repos found. Confirm <code>GITHUB_TOKEN</code> access to
+    <code>scope_*</code> repos under your GitHub account.
+  </p>
+  {% else %}
+  <form class="assignment-filter-form" id="worksheet-search">
+    <label for="repo">Repository</label>
+    <select
+      id="repo"
+      name="repo"
+      hx-get="/admin/distribute/prep/browse"
+      hx-target="#worksheet-list"
+      hx-include="#repo, #worksheet-q"
+      hx-vals='{"path": ""}'
+      hx-trigger="change"
+    >
+      {% for repo_info in repos %}
+      <option value="{{ repo_info.name }}" {% if repo_info.name == selected_repo %}selected{% endif %}>
+        {{ repo_info.name }}
+      </option>
+      {% endfor %}
+    </select>
+
+    <label for="worksheet-q">Search all PDFs</label>
+    <input
+      id="worksheet-q"
+      name="q"
+      type="search"
+      value="{{ search_query }}"
+      placeholder="Search filenames and paths across the repo"
+      hx-get="/admin/distribute/prep/browse"
+      hx-target="#worksheet-list"
+      hx-include="#repo, #worksheet-q"
+      hx-vals='{"path": ""}'
+      hx-trigger="input changed delay:300ms, search"
+    >
+    <p class="help-text">
+      Browse folders below, or search to jump directly to a worksheet anywhere
+      in the repo.
+    </p>
+  </form>
+
+  <div id="worksheet-list">
+    {% include "admin/_worksheet_list.html" %}
+  </div>
+  <script>
+    document.body.addEventListener("click", (event) => {
+      const trigger = event.target.closest(".repo-browser-nav");
+      if (!trigger) {
+        return;
+      }
+      const search = document.getElementById("worksheet-q");
+      if (search) {
+        search.value = "";
+      }
+    });
+  </script>
+  {% endif %}
+</section>
+{% endblock %}

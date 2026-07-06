@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>{{ title }}</h2>
+  {% if message %}
+  <p class="status-note error">{{ message }}</p>
+  {% else %}
+  <p class="status-note error">
+    GitHub distribution scanning is not configured on this server. Ask your
+    teacher to set <code>GITHUB_TOKEN</code> and <code>SCAN_PIN</code> in
+    <code>.env</code>, or use manual assignment upload instead.
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

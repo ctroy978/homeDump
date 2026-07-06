@@ -15,6 +15,7 @@ dependencies = [
     "qrcode[pil]",
     "python-dotenv",
     "pymupdf>=1.27.2.3",
+    "httpx",
 ]
 
 [project.scripts]

@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+
+{% block title %}Distribution Log{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Distribution log</h2>
+  <p class="help-text">
+    Every worksheet scan is recorded here — when you registered GitHub
+    assignments for specific periods. Use this as your record of when work was
+    distributed to classes.
+  </p>
+
+  <form class="assignment-filter-form" method="get" action="/admin/distribution-log">
+    <label for="filter-repo">Repository</label>
+    <input
+      id="filter-repo"
+      name="repo"
+      type="search"
+      value="{{ filters.repo }}"
+      placeholder="e.g. scope_tenth"
+    >
+
+    <label for="filter-date">Assigned date</label>
+    <input id="filter-date" name="date" type="date" value="{{ filters.date }}">
+
+    <label for="filter-outcome">Outcome</label>
+    <select id="filter-outcome" name="outcome">
+      <option value="all" {% if filters.outcome == "all" %}selected{% endif %}>All</option>
+      <option value="success" {% if filters.outcome == "success" %}selected{% endif %}>Success</option>
+      <option value="partial" {% if filters.outcome == "partial" %}selected{% endif %}>Partial</option>
+      <option value="all_duplicate" {% if filters.outcome == "all_duplicate" %}selected{% endif %}>All duplicate</option>
+      <option value="failure" {% if filters.outcome == "failure" %}selected{% endif %}>Failure</option>
+    </select>
+
+    <div class="filter-actions">
+      <button type="submit">Filter</button>
+      {% if filters.repo or filters.date or filters.outcome != "all" %}
+      <a href="/admin/distribution-log">Clear</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if logs %}
+  <table class="data-table claim-log-table">
+    <thead>
+      <tr>
+        <th>Scanned</th>
+        <th>Assigned date</th>
+        <th>Worksheet</th>
+        <th>Repo / path</th>
+        <th>Periods added</th>
+        <th>Skipped</th>
+        <th>Outcome</th>
+        <th>Details</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for entry in logs %}
+      <tr class="{% if entry.outcome == 'failure' %}log-failed{% elif entry.outcome == 'success' %}log-success{% endif %}">
+        <td>{{ entry.scanned_at }}</td>
+        <td>{{ entry.assigned_date }}</td>
+        <td>{{ entry.display_title }}</td>
+        <td><code>{{ entry.github_repo }}/{{ entry.github_path }}</code></td>
+        <td>
+          {% if entry.periods_added %}
+          {{ entry.periods_added | join(", ") }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        <td>
+          {% if entry.periods_skipped %}
+          {{ entry.periods_skipped | join(", ") }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+        <td>
+          {% if entry.outcome == "success" %}
+          <span class="badge badge-success">Success</span>
+          {% elif entry.outcome == "failure" %}
+          <span class="badge badge-failed">Failed</span>
+          {% else %}
+          <span class="badge">{{ entry.outcome }}</span>
+          {% endif %}
+        </td>
+        <td class="log-message">
+          {% if entry.error_message %}
+          {{ entry.error_message }}
+          {% elif entry.assignment_id %}
+          Assignment #{{ entry.assignment_id }}
+          {% else %}
+          —
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="help-text">Showing the {{ logs|length }} most recent entries.</p>
+  {% else %}
+  <p class="help-text">
+    {% if filters.repo or filters.date or filters.outcome != "all" %}
+    No distribution events match your filters.
+    {% else %}
+    No scans yet. Register a worksheet by scanning an install QR from a print
+    packet cover sheet.
+    {% endif %}
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

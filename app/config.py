@@ -44,6 +44,21 @@ def _parse_public_base_url(raw: str | None) -> str | None:
     return value or None
 
 
+def _parse_github_token(raw: str | None) -> str | None:
+    if not raw or not raw.strip():
+        return None
+    return raw.strip()
+
+
+def _parse_scan_pin(raw: str | None) -> str | None:
+    if not raw or not raw.strip():
+        return None
+    pin = raw.strip()
+    if len(pin) == 4 and pin.isdigit():
+        return pin
+    raise ValueError("SCAN_PIN must be exactly 4 digits.")
+
+
 @dataclass(frozen=True)
 class Settings:
     """Runtime settings for the classroom server."""
@@ -93,6 +108,26 @@ class Settings:
             os.getenv("PUBLIC_BASE_URL")
         )
     )
+    github_token: str | None = field(
+        default_factory=lambda: _parse_github_token(os.getenv("GITHUB_TOKEN"))
+    )
+    github_owner: str = field(
+        default_factory=lambda: os.getenv("GITHUB_OWNER", "krewten-978")
+    )
+    github_repo_filter: str = field(
+        default_factory=lambda: os.getenv("GITHUB_REPO_FILTER", "scope")
+    )
+    scan_pin: str | None = field(
+        default_factory=lambda: _parse_scan_pin(os.getenv("SCAN_PIN"))
+    )
+
+    @property
+    def github_enabled(self) -> bool:
+        return bool(self.github_token)
+
+    @property
+    def scan_enabled(self) -> bool:
+        return self.github_enabled and bool(self.scan_pin)
 
     def ensure_directories(self) -> None:
         """Create data directories if they do not exist yet."""

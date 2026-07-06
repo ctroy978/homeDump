@@ -45,6 +45,7 @@
         <th>Periods</th>
         <th>Assigned date</th>
         <th>Title</th>
+        <th>Source</th>
         <th>PDF</th>
         <th>Created</th>
         <th></th>
@@ -57,6 +58,13 @@
         <td>{{ item.periods_display }}</td>
         <td>{{ item.assigned_date }}</td>
         <td>{{ item.title }}</td>
+        <td>
+          {% if item.source == "github" %}
+          <span title="{{ item.github_repo }}/{{ item.github_path }}">GitHub</span>
+          {% else %}
+          Manual
+          {% endif %}
+        </td>
         <td>{{ item.pdf_filename }}</td>
         <td>{{ item.created_at }}</td>
         <td>

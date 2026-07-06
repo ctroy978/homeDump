@@ -37,6 +37,9 @@ these URLs for yourself:
 | Upload attendance | `http://localhost:8000/admin/attendance` |
 | Assignments | `http://localhost:8000/admin/assignments` |
 | Print queue | `http://localhost:8000/admin/print-queue` |
+| GitHub worksheets (Phase 8) | `http://localhost:8000/admin/distribute/prep` |
+| Distribution log (Phase 8) | `http://localhost:8000/admin/distribution-log` |
+| Scan install QR (Phase 8) | `http://localhost:8000/admin/distribute` |
 | Claim logs | `http://localhost:8000/admin/claims` |
 
 On the classroom network, replace `localhost` with your server address (the same
@@ -244,7 +247,7 @@ export that currently contains them.
    sqlite3 data/app.db ".tables"
    ```
 
-   Expected tables: `assignments`, `attendance_records`, `attendance_uploads`, `claim_logs`, `claim_tokens`, `print_queue`, `students`
+   Expected tables: `assignments`, `attendance_records`, `attendance_uploads`, `claim_logs`, `claim_tokens`, `distribution_events`, `print_queue`, `students`
 
 3. **Restart test** — stop and restart the server. It should start cleanly with no errors (schema init is idempotent).
 
@@ -272,6 +275,10 @@ Copy `.env.example` to `.env` and edit as needed:
 | `DATA_DIR` | Where database and uploaded files live |
 | `ALLOWABLE_ABSENCE_CODES` | Comma-separated absence codes that qualify |
 | `DEBUG` | Enable developer-only routes when `true` |
+| `GITHUB_TOKEN` | Read-only token for private `scope_*` worksheet repos (Phase 8) |
+| `GITHUB_OWNER` | GitHub owner for worksheet repos (default `krewten-978`) |
+| `GITHUB_REPO_FILTER` | Substring filter for repo dropdown (default `scope`) |
+| `SCAN_PIN` | Exactly 4 digits — unlocks install QR scan workflow (Phase 8) |
 
 ## Development phases
 
@@ -284,6 +291,7 @@ Copy `.env.example` to `.env` and edit as needed:
 | 5 | **Done** | Student form with SIS lookup and HTMX dropdowns |
 | 6 | **Done** | Print queue, watermarked PDFs, QR verification |
 | 7 | **Done** | Claim log review, backup/restore, admin download |
+| 8 | **Done** | GitHub worksheet prep, scan registration, distribution audit log |
 
 **All planned phases complete.** Say if you want further polish or deployment help.
 
@@ -316,6 +324,58 @@ After testing each phase, say **"build Phase N"** to continue.
 - `toprow.xlsx` — shows the full export column headers
 
 Run `uv run python scripts/build_test_fixture.py` to build a named test fixture from `cleanatt.xlsx`.
+
+## GitHub worksheet distribution (Phase 8)
+
+When `GITHUB_TOKEN` is set in `.env`, teachers can browse private `scope_*`
+repos, download a **print packet** (cover sheet with install QR + worksheet
+PDF), and register assignments on distribution day by scanning the QR and
+entering `SCAN_PIN`.
+
+**Prep (admin login):**
+
+1. Open **GitHub worksheets** (`/admin/distribute/prep`).
+2. Pick a repo, search PDFs, and download a print packet.
+3. Print the packet — the cover QR encodes repo + path only (not periods).
+
+**Scan (distribution day):**
+
+1. Scan the install QR on the cover sheet (opens `/admin/distribute?repo=...&path=...`).
+2. Enter the 4-digit `SCAN_PIN` from `.env`.
+3. Check the class periods you are distributing to and submit.
+4. `assigned_date` is the scan day; same worksheet + same day merges periods.
+
+**Audit:** **Distribution log** (`/admin/distribution-log`) lists every scan —
+success, partial, duplicate, and failure outcomes. The assignments list shows
+**Manual** vs **GitHub** source.
+
+Manual upload at `/admin/assignments/new` is unchanged.
+
+## Verify Phase 8 (GitHub distribution)
+
+1. **Configure `.env`** — set `GITHUB_TOKEN` (read-only `repo` scope) and
+   `SCAN_PIN` (exactly 4 digits). Restart the server.
+
+2. **Prep** — log in, open **GitHub worksheets**, confirm `scope_*` repos
+   appear, download a print packet, and verify the cover QR URL points to
+   `/admin/distribute`.
+
+3. **Scan** — open the distribute URL without a PIN cookie; confirm the PIN
+   form appears. Enter `SCAN_PIN`, select periods, and submit. Check
+   **Assignments** (source **GitHub**) and **Distribution log**.
+
+4. **Idempotency** — scan the same worksheet again the same day with
+   overlapping periods; confirm duplicate periods are skipped and the log shows
+   `all_duplicate` or `partial` as appropriate.
+
+5. **Student claim** — have a qualifying student claim the GitHub-sourced
+   assignment; watermark and verify QR should work like manual uploads.
+
+6. **Run automated tests:**
+
+   ```bash
+   uv run pytest tests/test_distribution_log.py tests/test_distribution_log_routes.py tests/test_distribution.py tests/test_distribution_routes.py tests/test_distribution_prep_routes.py -v
+   ```
 
 ## Verify Phase 7 (claim logs and backup)
 

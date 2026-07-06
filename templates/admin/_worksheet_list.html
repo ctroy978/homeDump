@@ -1,0 +1,104 @@
+{% if browse %}
+<div class="repo-browser">
+  {% if browse.search_active %}
+  <p class="repo-browser-context">
+    Search results in <code>{{ repo }}</code>
+    {% if search_query %}for “{{ search_query }}”{% endif %}
+  </p>
+  {% else %}
+  <nav class="repo-breadcrumbs" aria-label="Worksheet path">
+    {% if browse.current_path %}
+    <button
+      type="button"
+      class="repo-breadcrumb-link repo-browser-nav"
+      hx-get="/admin/distribute/prep/browse"
+      hx-target="#worksheet-list"
+      hx-include="#repo"
+      hx-vals='{"path": ""}'
+    >{{ repo }}</button>
+    {% for label, crumb_path in browse.breadcrumbs %}
+    <span class="repo-breadcrumb-sep">/</span>
+    {% if loop.last %}
+    <span class="repo-breadcrumb-current">{{ label }}</span>
+    {% else %}
+    <button
+      type="button"
+      class="repo-breadcrumb-link repo-browser-nav"
+      hx-get="/admin/distribute/prep/browse"
+      hx-target="#worksheet-list"
+      hx-include="#repo"
+      hx-vals='{"path": "{{ crumb_path }}"}'
+    >{{ label }}</button>
+    {% endif %}
+    {% endfor %}
+    {% else %}
+    <span class="repo-breadcrumb-current">{{ repo }}</span>
+    {% endif %}
+  </nav>
+  {% endif %}
+
+  {% if browse.directories or browse.files %}
+  <table class="data-table repo-browser-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for directory in browse.directories %}
+      <tr class="repo-browser-folder">
+        <td>
+          <button
+            type="button"
+            class="repo-browser-entry repo-browser-nav"
+            hx-get="/admin/distribute/prep/browse"
+            hx-target="#worksheet-list"
+            hx-include="#repo"
+            hx-vals='{"path": "{{ directory.path }}"}'
+          >
+            <span class="repo-browser-icon" aria-hidden="true">📁</span>
+            <span>{{ directory.name }}</span>
+          </button>
+        </td>
+        <td class="repo-browser-meta">Folder</td>
+      </tr>
+      {% endfor %}
+      {% for worksheet in browse.files %}
+      <tr class="repo-browser-file">
+        <td>
+          <div class="repo-browser-entry repo-browser-entry-static">
+            <span class="repo-browser-icon" aria-hidden="true">📄</span>
+            <span>
+              <strong>{{ worksheet.display_title }}</strong>
+              {% if browse.search_active %}
+              <span class="repo-browser-path"><code>{{ worksheet.path }}</code></span>
+              {% endif %}
+            </span>
+          </div>
+        </td>
+        <td>
+          <a
+            class="download-button"
+            href="/admin/distribute/prep/print-packet?repo={{ repo | urlencode }}&amp;path={{ worksheet.path | urlencode }}"
+          >Prepare print packet</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="help-text">
+    {% if browse.search_active %}
+    No PDF worksheets match “{{ search_query }}” in <code>{{ repo }}</code>.
+    {% elif browse.current_path %}
+    No PDF worksheets in <code>{{ browse.current_path }}</code>.
+    {% else %}
+    No PDF worksheets found in <code>{{ repo }}</code>.
+    {% endif %}
+  </p>
+  {% endif %}
+</div>
+{% else %}
+<p class="help-text">Select a repository to browse worksheets.</p>
+{% endif %}

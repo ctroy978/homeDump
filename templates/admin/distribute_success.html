@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<section class="card">
+  <h2>Distribution registered</h2>
+  <p class="help-text">
+    <strong>{{ display_title }}</strong>
+  </p>
+  <p class="assignment-meta">{{ repo }} / {{ path }}</p>
+
+  {% if result.outcome == "failure" %}
+  <p class="status-note error">
+    {{ result.message or "Registration failed. Check the distribution log or try again." }}
+  </p>
+  {% elif result.outcome == "all_duplicate" %}
+  <p class="status-note">
+    These periods were already registered for {{ result.assigned_date }}.
+    No changes were made.
+  </p>
+  {% elif result.outcome == "partial" %}
+  <p class="status-note success">
+    Registered for {{ result.assigned_date }}.
+    Added periods: {{ result.periods_added | join(", ") }}.
+    Already registered: {{ result.periods_skipped | join(", ") }}.
+  </p>
+  {% else %}
+  <p class="status-note success">
+    Registered for {{ result.assigned_date }}.
+    Periods added: {{ result.periods_added | join(", ") }}.
+  </p>
+  {% endif %}
+
+  {% if result.message and result.outcome != "failure" %}
+  <p class="status-note error">{{ result.message }}</p>
+  {% endif %}
+
+  {% if result.assignment_id %}
+  <p>
+    <a href="/admin/assignments">View assignments</a>
+    ·
+    <a href="/admin/distribution-log">Distribution log</a>
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

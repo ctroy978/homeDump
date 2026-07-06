@@ -8,6 +8,12 @@
 <section class="card">
   <h2>Dashboard</h2>
   <p>Manage attendance imports and homework assignments.</p>
+  {% if request.query_params.get('prep_error') == 'github_disabled' %}
+  <p class="status-note error">
+    GitHub worksheet prep is disabled. Set <code>GITHUB_TOKEN</code> in
+    <code>.env</code> to browse worksheets from your <code>scope_*</code> repos.
+  </p>
+  {% endif %}
 </section>
 
 <section class="card">
@@ -60,6 +66,10 @@
     <li><a href="/admin/assignments/new">Add new assignment</a></li>
     <li><a href="/admin/assignments">View all assignments</a></li>
     <li><a href="/admin/print-queue">Print homework queue</a></li>
+    {% if github_enabled() %}
+    <li><a href="/admin/distribute/prep">Prepare GitHub worksheets</a></li>
+    <li><a href="/admin/distribution-log">Review distribution log</a></li>
+    {% endif %}
     <li><a href="/admin/claims">Review claim logs</a></li>
   </ul>
 </section>
