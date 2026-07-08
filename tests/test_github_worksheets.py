@@ -76,6 +76,11 @@ def test_list_filtered_repos_uses_org_endpoint_when_available() -> None:
                     {"name": "notes", "full_name": "krewten-978/notes"},
                 ],
             ),
+            (
+                "GET",
+                "https://api.github.com/user/repos?per_page=100"
+                "&affiliation=owner,collaborator,organization_member",
+            ): httpx.Response(200, json=[]),
         }
     )
 
@@ -105,6 +110,11 @@ def test_list_filtered_repos_uses_org_then_user_fallback() -> None:
                     {"name": "other", "full_name": "krewten-978/other"},
                 ],
             ),
+            (
+                "GET",
+                "https://api.github.com/user/repos?per_page=100"
+                "&affiliation=owner,collaborator,organization_member",
+            ): httpx.Response(200, json=[]),
         }
     )
 
@@ -163,6 +173,61 @@ def test_list_filtered_repos_falls_back_to_authenticated_user_repos() -> None:
     )
     assert [repo.name for repo in repos] == ["scope_tenth"]
 
+
+def test_list_filtered_repos_merges_owner_and_authenticated_repos() -> None:
+    transport = _transport(
+        {
+            (
+                "GET",
+                "https://api.github.com/orgs/krewten-978/repos?per_page=100&type=all",
+            ): httpx.Response(404),
+            (
+                "GET",
+                "https://api.github.com/users/krewten-978/repos?per_page=100&type=all",
+            ): httpx.Response(
+                200,
+                json=[
+                    {"name": "scope_wr121", "full_name": "krewten-978/scope_wr121"},
+                ],
+            ),
+            (
+                "GET",
+                "https://api.github.com/user/repos?per_page=100"
+                "&affiliation=owner,collaborator,organization_member",
+            ): httpx.Response(
+                200,
+                json=[
+                    {
+                        "name": "scope_tenth",
+                        "full_name": "krewten-978/scope_tenth",
+                        "owner": {"login": "krewten-978"},
+                    },
+                    {
+                        "name": "scope_twelfth",
+                        "full_name": "krewten-978/scope_twelfth",
+                        "owner": {"login": "krewten-978"},
+                    },
+                    {
+                        "name": "scope_wr121",
+                        "full_name": "krewten-978/scope_wr121",
+                        "owner": {"login": "krewten-978"},
+                    },
+                ],
+            ),
+        }
+    )
+
+    repos = gh.list_filtered_repos(
+        owner="krewten-978",
+        repo_filter="scope",
+        token="test-token",
+        transport=transport,
+    )
+    assert [repo.name for repo in repos] == [
+        "scope_tenth",
+        "scope_twelfth",
+        "scope_wr121",
+    ]
 
 def test_fetch_repo_tree_uses_short_lived_cache(
     monkeypatch: pytest.MonkeyPatch,
@@ -357,6 +422,11 @@ def test_list_filtered_repos_follows_pagination() -> None:
                     }
                 ],
             ),
+            (
+                "GET",
+                "https://api.github.com/user/repos?per_page=100"
+                "&affiliation=owner,collaborator,organization_member",
+            ): httpx.Response(200, json=[]),
         }
     )
 

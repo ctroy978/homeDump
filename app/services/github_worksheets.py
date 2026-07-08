@@ -292,19 +292,22 @@ def list_filtered_repos(
         owner=resolved_owner,
         repo_filter=resolved_filter,
     )
-    if filtered:
-        return filtered
 
     authenticated_repos = _list_authenticated_repos(
         resolved_owner,
         token=token,
         transport=transport,
     )
-    return _filter_repo_infos(
-        authenticated_repos,
-        owner=resolved_owner,
-        repo_filter=resolved_filter,
+    filtered.extend(
+        _filter_repo_infos(
+            authenticated_repos,
+            owner=resolved_owner,
+            repo_filter=resolved_filter,
+        )
     )
+
+    unique_by_name = {repo.name: repo for repo in filtered}
+    return sorted(unique_by_name.values(), key=lambda repo: repo.name)
 
 
 def validate_browse_path(path: str | None) -> str:
