@@ -93,7 +93,7 @@ def test_first_registration_creates_assignment_and_writes_pdf(
         "SELECT title, pdf_filename FROM assignments WHERE id = ?",
         (assignment_id,),
     ).fetchone()
-    assert assignment["title"] == "ch04.pdf"
+    assert assignment["title"] == "unit2-ch04"
     assert assignment["pdf_filename"] == "ch04.pdf"
 
     row = db_conn.execute(

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
 import httpx
@@ -70,11 +71,22 @@ class WorksheetBrowseResult:
 def display_title_from_path(path: str) -> str:
     """Return the default assignment title for a GitHub worksheet.
 
-    Keep the GitHub worksheet title aligned with the actual PDF filename instead
-    of humanizing the stem. This avoids many different files collapsing to a
-    generic title like "worksheet" when repos use folder paths for organization.
+    Use the immediate parent folder plus the PDF filename stem so common names
+    like ``worksheet.pdf`` remain distinguishable in the homework app. For
+    example, ``unit1/lesson2/worksheet.pdf`` becomes ``lesson2-worksheet``.
     """
-    return Path(path).name.strip() or path
+    cleaned = path.strip().strip("/")
+    pdf_path = PurePosixPath(cleaned)
+    stem = pdf_path.stem.strip()
+    parent = pdf_path.parent.name.strip() if str(pdf_path.parent) != "." else ""
+    parts = [part for part in (parent, stem) if part]
+
+    title_parts = [
+        re.sub(r"[^A-Za-z0-9]+", "-", part).strip("-")
+        for part in parts
+    ]
+    title = "-".join(part for part in title_parts if part)
+    return title or Path(path).name.strip() or path
 
 
 def validate_repo_name(repo: str) -> None:
