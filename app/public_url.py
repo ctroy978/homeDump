@@ -1,4 +1,4 @@
-"""Resolve the classroom-facing base URL for links and QR codes."""
+"""Resolve the classroom-facing base URL for generated links."""
 
 from __future__ import annotations
 
@@ -37,13 +37,13 @@ def _reject_unreachable_host(hostname: str) -> None:
         raise PublicUrlError(
             "Set PUBLIC_BASE_URL in .env to the address students use in Chrome "
             f"(for example http://192.168.1.50:8000 or http://classroom-pc.local:8000). "
-            f"QR codes cannot use {hostname}."
+            f"generated links cannot use {hostname}."
         )
 
 
 def resolve_public_base_url(request: Request) -> str:
     """
-    Return the base URL encoded into claim QR codes.
+    Return the base URL used for generated links.
 
     Uses ``PUBLIC_BASE_URL`` when set. Otherwise builds from the request's
     ``Host`` header, which reflects the address the browser actually used.

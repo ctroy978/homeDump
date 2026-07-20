@@ -17,7 +17,6 @@ from app.services.attendance_parser import upsert_student
 from app.services.claims import (
     ClaimError,
     claim_pdf_path,
-    generate_qr_image,
     get_claim_by_token,
     process_claim,
 )
@@ -35,14 +34,12 @@ def claim_env(
         database_path=data_dir / "app.db",
         assignments_dir=data_dir / "assignments",
         claims_dir=data_dir / "claims",
-        qrcodes_dir=data_dir / "qrcodes",
         public_base_url=None,
     )
     for path in (
         data_dir,
         test_settings.assignments_dir,
         test_settings.claims_dir,
-        test_settings.qrcodes_dir,
     ):
         path.mkdir(parents=True, exist_ok=True)
 
@@ -145,7 +142,7 @@ def test_process_claim_issues_token_and_assets(
     pdf_path = claim_pdf_path(result.token)
     assert pdf_path.exists()
     assert pdf_path.stat().st_size > 500
-    assert (test_settings.qrcodes_dir / f"{result.token}.png").exists()
+    assert not (test_settings.data_dir / "qrcodes" / f"{result.token}.png").exists()
 
     row = conn.execute(
         "SELECT COUNT(*) FROM claim_logs WHERE success = 1 AND token = ?",
@@ -207,34 +204,7 @@ def test_process_claim_rejects_ineligible_student(
         )
 
 
-def test_generate_qr_image_overwrites_existing_url(
-    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _, test_settings = claim_env
-    calls: list[str] = []
-
-    def _record_make(url: str):
-        calls.append(url)
-        from PIL import Image
-
-        image = Image.new("RGB", (10, 10), color="white")
-        return image
-
-    monkeypatch.setattr("app.services.claims.qrcode.make", _record_make)
-
-    token = "ABCD1234"
-    generate_qr_image(token, "http://old-host:8000/verify/ABCD1234")
-    generate_qr_image(token, "http://new-host:8000/verify/ABCD1234")
-
-    assert calls == [
-        "http://old-host:8000/verify/ABCD1234",
-        "http://new-host:8000/verify/ABCD1234",
-    ]
-    assert (test_settings.qrcodes_dir / f"{token}.png").exists()
-
-
-def test_process_claim_refreshes_qr_when_public_url_changes(
+def test_process_claim_does_not_generate_qr_assets(
     claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
 ) -> None:
     conn, test_settings = claim_env
@@ -258,7 +228,7 @@ def test_process_claim_refreshes_qr_when_public_url_changes(
     )
 
     assert first.token == second.token
-    assert (test_settings.qrcodes_dir / f"{first.token}.png").exists()
+    assert not (test_settings.data_dir / "qrcodes" / f"{first.token}.png").exists()
 
 
 def test_process_claim_rejects_unknown_sis(

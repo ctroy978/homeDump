@@ -96,10 +96,6 @@ class Settings:
         return self.data_dir / "assignments"
 
     @property
-    def qrcodes_dir(self) -> Path:
-        return self.data_dir / "qrcodes"
-
-    @property
     def claims_dir(self) -> Path:
         return self.data_dir / "claims"
 
@@ -135,7 +131,6 @@ class Settings:
             self.data_dir,
             self.attendance_upload_dir,
             self.assignments_dir,
-            self.qrcodes_dir,
             self.claims_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)

@@ -82,7 +82,7 @@ def verify_claim(
     token: str,
     db=Depends(get_db),
 ) -> HTMLResponse:
-    """Public verification page encoded in claim QR codes."""
+    """Public verification page for printed claim codes."""
     claim = get_claim_by_token(db, token)
     if claim is None:
         return templates.TemplateResponse(

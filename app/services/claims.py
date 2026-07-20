@@ -1,4 +1,4 @@
-"""Generate traceable makeup homework claims with watermarked PDFs and QR codes."""
+"""Generate traceable makeup homework claims with watermarked PDFs."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ from io import BytesIO
 from pathlib import Path
 
 import fitz
-import qrcode
 from PIL import Image, ImageDraw
 from pypdf import PdfReader, PdfWriter
 
@@ -144,37 +143,9 @@ def _build_watermark_page(width: float, height: float, lines: list[str]) -> byte
     return buffer.getvalue()
 
 
-def _build_qr_overlay_page(
-    width: float,
-    height: float,
-    qr_image_path: Path,
-    token: str,
-) -> bytes:
-    """Place a scannable verification QR in the top-right of the first page."""
-    qr_size = int(min(width, height) * 0.18)
-    margin = int(width * 0.04)
-
-    qr_img = Image.open(qr_image_path).convert("RGBA")
-    qr_img = qr_img.resize((qr_size, qr_size), Image.Resampling.LANCZOS)
-
-    overlay = Image.new("RGBA", (int(width), int(height)), (255, 255, 255, 0))
-    x = int(width) - qr_size - margin
-    # PDF page coordinates are in points at 72 points per inch.
-    # Keep the QR in the top-right, but drop it down another 0.5 inch.
-    y = margin + 36
-    overlay.paste(qr_img, (x, y), qr_img)
-
-    draw = ImageDraw.Draw(overlay)
-    draw.text((x, y + qr_size + 4), f"Verify {token}", fill=(40, 40, 40, 255))
-
-    buffer = BytesIO()
-    overlay.save(buffer, "PDF", resolution=72.0)
-    return buffer.getvalue()
-
-
 def _flatten_pdf_for_printing(pdf_bytes: bytes, *, dpi: int = 200) -> bytes:
     """
-    Rasterize each page so worksheet, watermark, and QR print as one layer.
+    Rasterize each page so worksheet and watermark print as one layer.
 
     Physical printers often skip underlying PDF content when transparent overlays
     are merged on top. Flattening composites everything into a single opaque page.
@@ -199,30 +170,20 @@ def watermark_pdf(
     source: Path,
     destination: Path,
     lines: list[str],
-    *,
-    qr_image_path: Path | None = None,
-    token: str | None = None,
 ) -> None:
-    """Overlay traceability text on every page and a QR code on the first page."""
+    """Overlay traceability text on every page."""
     if not source.exists():
         raise ClaimError("Original assignment PDF is missing.")
-    if qr_image_path is not None and token is None:
-        raise ValueError("token is required when qr_image_path is provided.")
 
     reader = PdfReader(str(source))
     writer = PdfWriter()
-    for index, page in enumerate(reader.pages):
+    for page in reader.pages:
         width = float(page.mediabox.width)
         height = float(page.mediabox.height)
         watermark_page = PdfReader(
             BytesIO(_build_watermark_page(width, height, lines))
         ).pages[0]
         page.merge_page(watermark_page)
-        if index == 0 and qr_image_path is not None and token is not None:
-            qr_page = PdfReader(
-                BytesIO(_build_qr_overlay_page(width, height, qr_image_path, token))
-            ).pages[0]
-            page.merge_page(qr_page)
         writer.add_page(page)
 
     buffer = BytesIO()
@@ -231,15 +192,6 @@ def watermark_pdf(
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("wb") as handle:
         handle.write(_flatten_pdf_for_printing(buffer.getvalue()))
-
-
-def generate_qr_image(token: str, verify_url: str) -> Path:
-    """Create or refresh a QR code PNG that links to the verification page."""
-    settings.qrcodes_dir.mkdir(parents=True, exist_ok=True)
-    destination = settings.qrcodes_dir / f"{token}.png"
-    image = qrcode.make(verify_url)
-    image.save(destination)
-    return destination
 
 
 def claim_pdf_path(token: str) -> Path:
@@ -338,8 +290,6 @@ def process_claim(
     else:
         token = str(existing["token"])
 
-    base = public_base_url.rstrip("/")
-    verify_url = f"{base}/verify/{token}"
     lines = _watermark_lines(
         name,
         token,
@@ -348,14 +298,11 @@ def process_claim(
         str(assignment["title"]),
     )
 
-    qr_path = generate_qr_image(token, verify_url)
     pdf_destination = claim_pdf_path(token)
     watermark_pdf(
         get_assignment_pdf_path(assignment_id),
         pdf_destination,
         lines,
-        qr_image_path=qr_path,
-        token=token,
     )
 
     log_claim(

@@ -2,7 +2,7 @@
 
 A self-contained classroom tool for distributing traceable makeup homework to students who had an allowable absence.
 
-Students on Chromebooks access the app over the local network. The teacher uploads weekly attendance Excel files and homework PDFs. When a student qualifies, they confirm a request; the teacher prints a batch of watermarked PDFs with verification QR codes.
+Students on Chromebooks access the app over the local network. The teacher uploads weekly attendance Excel files and homework PDFs. When a student qualifies, they confirm a request; the teacher prints a batch of watermarked PDFs with traceability codes.
 
 ## Requirements
 
@@ -130,16 +130,16 @@ export that currently contains them.
 
 5. **Check printed PDF** — confirm:
    - A diagonal text watermark on every page (name, code, period, date)
-   - A verification **QR code in the top-right corner of page 1**
+   - No QR code is added to the worksheet
 
-6. **Verify QR** — scan the QR code (or open the `/verify/{code}` URL). The page
-   should show the registered student, assignment, period, and absence date.
+6. **Verify code** — open the `/verify/{code}` URL. The page should show the
+   registered student, assignment, period, and absence date.
 
 7. **Queue cleanup** — use **Remove** on one row or **Clear queue** to discard
    requests without printing (students can confirm again after removal).
 
-8. **Set `PUBLIC_BASE_URL` in `.env`** so QR codes use the address students
-   actually browse to (not `0.0.0.0`):
+8. **Set `PUBLIC_BASE_URL` in `.env`** so generated links use the address
+   students actually browse to (not `0.0.0.0`):
 
    ```
    PUBLIC_BASE_URL=http://192.168.1.42:8000
@@ -268,7 +268,7 @@ Copy `.env.example` to `.env` and edit as needed:
 
 | Variable | Purpose |
 |----------|---------|
-| `PUBLIC_BASE_URL` | **Required for go-live** — classroom IP or hostname for student links and QR codes |
+| `PUBLIC_BASE_URL` | **Required for go-live** — classroom IP or hostname for student links |
 | `ADMIN_PASSWORD` | Teacher admin login (Phase 4+) |
 | `SECRET_KEY` | Signs admin session cookies |
 | `HOST` / `PORT` | Server bind address |

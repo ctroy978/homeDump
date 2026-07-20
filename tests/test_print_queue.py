@@ -37,14 +37,12 @@ def queue_env(
         database_path=data_dir / "app.db",
         assignments_dir=data_dir / "assignments",
         claims_dir=data_dir / "claims",
-        qrcodes_dir=data_dir / "qrcodes",
         public_base_url=None,
     )
     for path in (
         data_dir,
         test_settings.assignments_dir,
         test_settings.claims_dir,
-        test_settings.qrcodes_dir,
     ):
         path.mkdir(parents=True, exist_ok=True)
 
