@@ -22,9 +22,9 @@ def _transport(handlers: dict[tuple[str, str], httpx.Response]) -> httpx.MockTra
     return httpx.MockTransport(handler)
 
 
-def test_display_title_from_path() -> None:
-    assert gh.display_title_from_path("unit2/ch04_practice.pdf") == "ch04 practice"
-    assert gh.display_title_from_path("worksheet.PDF") == "worksheet"
+def test_display_title_from_path_uses_pdf_filename() -> None:
+    assert gh.display_title_from_path("unit2/ch04_practice.pdf") == "ch04_practice.pdf"
+    assert gh.display_title_from_path("unit2/worksheet.PDF") == "worksheet.PDF"
 
 
 @pytest.mark.parametrize(

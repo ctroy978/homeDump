@@ -68,8 +68,13 @@ class WorksheetBrowseResult:
 
 
 def display_title_from_path(path: str) -> str:
-    stem = Path(path).name.removesuffix(".pdf").removesuffix(".PDF")
-    return stem.replace("_", " ").replace("-", " ").strip() or path
+    """Return the default assignment title for a GitHub worksheet.
+
+    Keep the GitHub worksheet title aligned with the actual PDF filename instead
+    of humanizing the stem. This avoids many different files collapsing to a
+    generic title like "worksheet" when repos use folder paths for organization.
+    """
+    return Path(path).name.strip() or path
 
 
 def validate_repo_name(repo: str) -> None:
