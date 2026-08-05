@@ -11,9 +11,9 @@
     <button
       type="button"
       class="repo-breadcrumb-link repo-browser-nav"
-      hx-get="/admin/distribute/prep/browse"
+      hx-get="{{ browse_url }}"
       hx-target="#worksheet-list"
-      hx-include="#repo"
+      hx-include="#{{ repo_field_id }}"
       hx-vals='{"path": ""}'
     >{{ repo }}</button>
     {% for label, crumb_path in browse.breadcrumbs %}
@@ -24,9 +24,9 @@
     <button
       type="button"
       class="repo-breadcrumb-link repo-browser-nav"
-      hx-get="/admin/distribute/prep/browse"
+      hx-get="{{ browse_url }}"
       hx-target="#worksheet-list"
-      hx-include="#repo"
+      hx-include="#{{ repo_field_id }}"
       hx-vals='{"path": "{{ crumb_path }}"}'
     >{{ label }}</button>
     {% endif %}
@@ -52,9 +52,9 @@
           <button
             type="button"
             class="repo-browser-entry repo-browser-nav"
-            hx-get="/admin/distribute/prep/browse"
+            hx-get="{{ browse_url }}"
             hx-target="#worksheet-list"
-            hx-include="#repo"
+            hx-include="#{{ repo_field_id }}"
             hx-vals='{"path": "{{ directory.path }}"}'
           >
             <span class="repo-browser-icon" aria-hidden="true">📁</span>
@@ -78,10 +78,20 @@
           </div>
         </td>
         <td>
+          {% if browser_mode == "assignment" %}
+          <button
+            type="button"
+            class="download-button github-assignment-select"
+            data-repo="{{ repo }}"
+            data-path="{{ worksheet.path }}"
+            data-title="{{ worksheet.display_title }}"
+          >Use this PDF</button>
+          {% else %}
           <a
             class="download-button"
             href="/admin/distribute/prep/print-packet?repo={{ repo | urlencode }}&amp;path={{ worksheet.path | urlencode }}"
           >Prepare print packet</a>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

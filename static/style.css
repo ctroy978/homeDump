@@ -169,7 +169,7 @@ main {
 }
 
 .assignment-form {
-  max-width: 520px;
+  max-width: 760px;
 }
 
 .assignment-form select,
@@ -183,6 +183,43 @@ main {
 
 .assignment-form textarea {
   resize: vertical;
+}
+
+.assignment-source-panel {
+  display: grid;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.assignment-source-panel[hidden] {
+  display: none;
+}
+
+.source-options {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.source-picker .help-text {
+  margin-bottom: 0;
+}
+
+.github-picker-controls {
+  display: grid;
+  gap: 0.5rem;
+  max-width: 520px;
+}
+
+.github-picker-controls label {
+  font-weight: 600;
+}
+
+.github-selection {
+  margin: 0;
 }
 
 .period-picker {

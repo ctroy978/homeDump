@@ -121,6 +121,9 @@ def distribute_prep_page(
             "browse": browse,
             "search_query": "",
             "error": error_message,
+            "browser_mode": "packet",
+            "browse_url": "/admin/distribute/prep/browse",
+            "repo_field_id": "repo",
         },
     )
 
@@ -154,6 +157,9 @@ def distribute_prep_browse(
             "repo": repo,
             "browse": browse,
             "search_query": q or "",
+            "browser_mode": "packet",
+            "browse_url": "/admin/distribute/prep/browse",
+            "repo_field_id": "repo",
         },
     )
 

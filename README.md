@@ -199,7 +199,10 @@ export that currently contains them.
 
 3. **Log in** at `http://localhost:8000/admin/login`
 
-4. **Add an assignment** — Period, assigned date, title, and a PDF file.
+4. **Add an assignment** — choose one or more periods, an assigned date, title,
+   and description. Keep **Upload from this computer** selected for a local PDF,
+   or choose **GitHub** to browse/search configured worksheet repos and select a
+   PDF directly from `main`.
 
 5. **Verify files on disk:**
 
@@ -349,7 +352,10 @@ entering `SCAN_PIN`.
 success, partial, duplicate, and failure outcomes. The assignments list shows
 **Manual** vs **GitHub** source.
 
-Manual upload at `/admin/assignments/new` is unchanged.
+The Add Assignment page at `/admin/assignments/new` supports both local PDF
+uploads and direct selection from these same GitHub repositories. Selecting a
+GitHub PDF prefills an editable title while retaining the normal date, periods,
+and description fields.
 
 ## Verify Phase 8 (GitHub distribution)
 

@@ -3,7 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
+from pathlib import Path
 
+import pytest
+
+from app.config import settings
+import app.services.assignments as assignments_module
 from app.services.assignments import create_assignment
 from app.services.student_lookup import (
     LOOKUP_FAILURE_MESSAGE,
@@ -14,6 +20,16 @@ from app.services.student_lookup import (
     list_eligible_dates_for_student,
     list_periods_with_assignments,
 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_assignment_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep assignment PDFs created by lookup tests out of runtime data/."""
+    test_settings = replace(settings, data_dir=tmp_path / "data")
+    monkeypatch.setattr(assignments_module, "settings", test_settings)
 
 
 def _add_assignment(

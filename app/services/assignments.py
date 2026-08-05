@@ -48,6 +48,10 @@ def create_assignment(
     description: str | None,
     pdf_bytes: bytes,
     original_filename: str,
+    *,
+    source: str = "manual",
+    github_repo: str | None = None,
+    github_path: str | None = None,
 ) -> int:
     """
     Insert an assignment row, link it to one or more periods, and store its PDF.
@@ -64,31 +68,61 @@ def create_assignment(
     safe_filename = Path(original_filename or "assignment.pdf").name
     if not safe_filename.lower().endswith(".pdf"):
         raise ValueError("Assignment file must be a PDF.")
+    if not pdf_bytes:
+        raise ValueError("PDF file is empty.")
+    if source not in {"manual", "github"}:
+        raise ValueError("Invalid assignment source.")
+    if source == "github" and (not github_repo or not github_path):
+        raise ValueError("GitHub repository and PDF path are required.")
 
-    cursor = conn.execute(
-        """
-        INSERT INTO assignments (assigned_date, title, description, pdf_filename)
-        VALUES (?, ?, ?, ?)
-        """,
-        (assigned_date, title, description, safe_filename),
-    )
-    assignment_id = int(cursor.lastrowid)
+    assignment_dir: Path | None = None
+    created_assignment_dir = False
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO assignments (
+                assigned_date, title, description, pdf_filename,
+                source, github_repo, github_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                assigned_date,
+                title,
+                description,
+                safe_filename,
+                source,
+                github_repo,
+                github_path,
+            ),
+        )
+        assignment_id = int(cursor.lastrowid)
 
-    conn.executemany(
-        """
-        INSERT INTO assignment_periods (assignment_id, period)
-        VALUES (?, ?)
-        """,
-        [(assignment_id, period) for period in period_list],
-    )
+        conn.executemany(
+            """
+            INSERT INTO assignment_periods (assignment_id, period)
+            VALUES (?, ?)
+            """,
+            [(assignment_id, period) for period in period_list],
+        )
 
-    assignment_dir = settings.assignments_dir / str(assignment_id)
-    assignment_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = assignment_dir / "original.pdf"
-    pdf_path.write_bytes(pdf_bytes)
+        assignment_dir = settings.assignments_dir / str(assignment_id)
+        created_assignment_dir = not assignment_dir.exists()
+        assignment_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = assignment_dir / "original.pdf"
+        pdf_path.write_bytes(pdf_bytes)
 
-    conn.commit()
-    return assignment_id
+        conn.commit()
+        return assignment_id
+    except Exception:
+        conn.rollback()
+        if (
+            created_assignment_dir
+            and assignment_dir is not None
+            and assignment_dir.exists()
+        ):
+            shutil.rmtree(assignment_dir)
+        raise
 
 
 def find_github_assignment(
@@ -119,6 +153,7 @@ def create_github_assignment(
     github_repo: str,
     github_path: str,
     pdf_filename: str,
+    description: str | None = None,
 ) -> int:
     """
     Insert a GitHub-sourced assignment and period links without committing.
@@ -136,9 +171,16 @@ def create_github_assignment(
             assigned_date, title, description, pdf_filename,
             source, github_repo, github_path
         )
-        VALUES (?, ?, NULL, ?, 'github', ?, ?)
+        VALUES (?, ?, ?, ?, 'github', ?, ?)
         """,
-        (assigned_date, title, pdf_filename, github_repo, github_path),
+        (
+            assigned_date,
+            title,
+            description,
+            pdf_filename,
+            github_repo,
+            github_path,
+        ),
     )
     assignment_id = int(cursor.lastrowid)
 

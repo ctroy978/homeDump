@@ -2,6 +2,10 @@
 
 {% block title %}Add Assignment{% endblock %}
 
+{% block head %}
+<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+{% endblock %}
+
 {% block content %}
 {% include "admin/_nav.html" %}
 
@@ -10,14 +14,127 @@
   <p>
     Students can claim this homework when they had an allowable absence on the
     <strong>assigned date</strong> in one of the selected <strong>periods</strong>.
-    Select every class that received the same assignment — you only upload the PDF once.
+    Select every class that received the same assignment — you only add the PDF once.
   </p>
 
   {% if error %}
   <p class="status-note error">{{ error }}</p>
   {% endif %}
 
-  <form class="upload-form assignment-form" action="/admin/assignments/new" method="post" enctype="multipart/form-data">
+  <form
+    class="upload-form assignment-form"
+    id="assignment-form"
+    action="/admin/assignments/new"
+    method="post"
+    enctype="multipart/form-data"
+  >
+    <fieldset class="period-picker source-picker">
+      <legend>Worksheet source</legend>
+      <div class="source-options">
+        <label class="period-checkbox">
+          <input
+            type="radio"
+            name="source"
+            value="upload"
+            {% if form.source != "github" %}checked{% endif %}
+          >
+          Upload from this computer
+        </label>
+        <label class="period-checkbox">
+          <input
+            type="radio"
+            name="source"
+            value="github"
+            {% if form.source == "github" %}checked{% endif %}
+            {% if not github_enabled() %}disabled{% endif %}
+          >
+          Choose from GitHub
+        </label>
+      </div>
+      {% if not github_enabled() %}
+      <p class="help-text">Set <code>GITHUB_TOKEN</code> to enable GitHub worksheets.</p>
+      {% endif %}
+    </fieldset>
+
+    <div id="upload-source-panel" class="assignment-source-panel">
+      <label for="pdf">Homework PDF</label>
+      <input id="pdf" name="pdf" type="file" accept=".pdf,application/pdf">
+    </div>
+
+    <div id="github-source-panel" class="assignment-source-panel" hidden>
+      <input
+        id="github-repo-value"
+        name="github_repo"
+        type="hidden"
+        value="{{ form.github_repo }}"
+      >
+      <input
+        id="github-path-value"
+        name="github_path"
+        type="hidden"
+        value="{{ form.github_path }}"
+      >
+
+      {% if github_error %}
+      <p class="status-note error">{{ github_error }}</p>
+      {% endif %}
+
+      {% if repos %}
+      <div class="github-picker-controls">
+        <label for="assignment-github-repo">Repository</label>
+        <select
+          id="assignment-github-repo"
+          name="repo"
+          hx-get="/admin/assignments/new/github-browse"
+          hx-target="#worksheet-list"
+          hx-include="#assignment-github-repo, #assignment-github-query"
+          hx-vals='{"path": ""}'
+          hx-trigger="change"
+        >
+          {% for repo_info in repos %}
+          <option value="{{ repo_info.name }}" {% if repo_info.name == selected_repo %}selected{% endif %}>
+            {{ repo_info.name }}
+          </option>
+          {% endfor %}
+        </select>
+
+        <label for="assignment-github-query">Search all PDFs</label>
+        <input
+          id="assignment-github-query"
+          name="q"
+          type="search"
+          value="{{ search_query }}"
+          placeholder="Search worksheets and tests"
+          hx-get="/admin/assignments/new/github-browse"
+          hx-target="#worksheet-list"
+          hx-include="#assignment-github-repo, #assignment-github-query"
+          hx-vals='{"path": ""}'
+          hx-trigger="input changed delay:300ms, search"
+        >
+      </div>
+
+      <div
+        id="github-selection"
+        class="status-note success github-selection"
+        {% if not form.github_path %}hidden{% endif %}
+      >
+        Selected: <strong id="github-selection-name">{{ form.github_path }}</strong>
+        <span id="github-selection-path" class="repo-browser-path">{{ form.github_repo }}/{{ form.github_path }}</span>
+      </div>
+      <p id="github-selection-error" class="status-note error" hidden>
+        Choose a PDF from GitHub before saving.
+      </p>
+
+      <div id="worksheet-list">
+        {% include "admin/_worksheet_list.html" %}
+      </div>
+      {% elif not github_error %}
+      <p class="status-note error">
+        No worksheet repositories were found for the configured GitHub account.
+      </p>
+      {% endif %}
+    </div>
+
     <fieldset class="period-picker">
       <legend>Class periods</legend>
       <p class="help-text">Check each period that gets this assignment.</p>
@@ -45,10 +162,95 @@
     <label for="description">Description (optional)</label>
     <textarea id="description" name="description" rows="3">{{ form.description }}</textarea>
 
-    <label for="pdf">Homework PDF</label>
-    <input id="pdf" name="pdf" type="file" accept=".pdf,application/pdf" required>
-
     <button type="submit">Save assignment</button>
   </form>
 </section>
+
+<script>
+  (() => {
+    const form = document.getElementById("assignment-form");
+    const uploadPanel = document.getElementById("upload-source-panel");
+    const githubPanel = document.getElementById("github-source-panel");
+    const pdfInput = document.getElementById("pdf");
+    const repoSelect = document.getElementById("assignment-github-repo");
+    const repoValue = document.getElementById("github-repo-value");
+    const pathValue = document.getElementById("github-path-value");
+    const titleInput = document.getElementById("title");
+    const selection = document.getElementById("github-selection");
+    const selectionName = document.getElementById("github-selection-name");
+    const selectionPath = document.getElementById("github-selection-path");
+    const selectionError = document.getElementById("github-selection-error");
+
+    function selectedSource() {
+      return form.querySelector('input[name="source"]:checked')?.value || "upload";
+    }
+
+    function updateSourcePanels() {
+      const githubSelected = selectedSource() === "github";
+      uploadPanel.hidden = githubSelected;
+      githubPanel.hidden = !githubSelected;
+      pdfInput.required = !githubSelected;
+    }
+
+    function clearGithubSelection() {
+      pathValue.value = "";
+      selection.hidden = true;
+      selectionError.hidden = true;
+    }
+
+    form.querySelectorAll('input[name="source"]').forEach((radio) => {
+      radio.addEventListener("change", updateSourcePanels);
+    });
+
+    repoSelect?.addEventListener("change", () => {
+      repoValue.value = repoSelect.value;
+      clearGithubSelection();
+      const search = document.getElementById("assignment-github-query");
+      if (search) {
+        search.value = "";
+      }
+    });
+
+    document.body.addEventListener("click", (event) => {
+      const navTrigger = event.target.closest(".repo-browser-nav");
+      if (navTrigger && !githubPanel.hidden) {
+        const search = document.getElementById("assignment-github-query");
+        if (search) {
+          search.value = "";
+        }
+      }
+
+      const trigger = event.target.closest(".github-assignment-select");
+      if (!trigger) {
+        return;
+      }
+
+      const previousSuggestion = titleInput.dataset.githubSuggestion || "";
+      repoValue.value = trigger.dataset.repo;
+      pathValue.value = trigger.dataset.path;
+      selectionName.textContent = trigger.dataset.title;
+      selectionPath.textContent = `${trigger.dataset.repo}/${trigger.dataset.path}`;
+      selection.hidden = false;
+      selectionError.hidden = true;
+
+      if (!titleInput.value.trim() || titleInput.value === previousSuggestion) {
+        titleInput.value = trigger.dataset.title;
+      }
+      titleInput.dataset.githubSuggestion = trigger.dataset.title;
+    });
+
+    form.addEventListener("submit", (event) => {
+      if (selectedSource() === "github" && !pathValue.value) {
+        event.preventDefault();
+        selectionError.hidden = false;
+        selectionError.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    });
+
+    if (repoSelect && !repoValue.value) {
+      repoValue.value = repoSelect.value;
+    }
+    updateSourcePanels();
+  })();
+</script>
 {% endblock %}

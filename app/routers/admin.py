@@ -5,9 +5,10 @@ from __future__ import annotations
 import hmac
 import tempfile
 from datetime import datetime
+from html import escape
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from starlette.background import BackgroundTask
@@ -21,7 +22,15 @@ from app.dependencies import (
     _expected_admin_token,
     require_admin,
 )
-from app.services.assignments import create_assignment, delete_assignment, list_assignments
+from app.services.assignments import (
+    add_periods_to_assignment,
+    create_assignment,
+    delete_assignment,
+    find_github_assignment,
+    get_assignment_pdf_path,
+    list_assignments,
+    write_assignment_pdf,
+)
 from app.services.attendance_parser import SUPPORTED_EXTENSIONS, ingest_attendance_file
 from app.services.claim_logs import ClaimLogStatus, list_claim_logs
 from app.services.data_backup import (
@@ -29,6 +38,14 @@ from app.services.data_backup import (
     backup_archive_name,
     data_dir_has_backup_content,
     write_data_backup,
+)
+from app.services.github_worksheets import (
+    GitHubWorksheetError,
+    assert_repo_allowed,
+    browse_pdf_worksheets,
+    fetch_pdf_bytes,
+    list_filtered_repos,
+    validate_worksheet_locator,
 )
 from app.services.print_queue import (
     PrintQueueError,
@@ -108,6 +125,56 @@ def _save_attendance_upload(upload: UploadFile) -> Path:
     destination = settings.attendance_upload_dir / f"{timestamp}_{safe_name}"
     destination.write_bytes(upload.file.read())
     return destination
+
+
+def _assignment_form_context(
+    form: dict,
+    *,
+    error: str | None = None,
+) -> dict:
+    """Build Add Assignment context without letting GitHub failures block uploads."""
+    context = {
+        "title": "Add Assignment",
+        "form": form,
+        "repos": [],
+        "selected_repo": "",
+        "repo": "",
+        "browse": None,
+        "search_query": "",
+        "github_error": None,
+        "browser_mode": "assignment",
+        "browse_url": "/admin/assignments/new/github-browse",
+        "repo_field_id": "assignment-github-repo",
+    }
+    if error:
+        context["error"] = error
+    if not settings.github_enabled:
+        return context
+
+    try:
+        repos = list_filtered_repos()
+        requested_repo = str(form.get("github_repo") or "")
+        repo_names = {item.name for item in repos}
+        selected_repo = (
+            requested_repo
+            if requested_repo in repo_names
+            else (repos[0].name if repos else "")
+        )
+        context.update(
+            {
+                "repos": repos,
+                "selected_repo": selected_repo,
+                "repo": selected_repo,
+                "browse": (
+                    browse_pdf_worksheets(selected_repo)
+                    if selected_repo
+                    else None
+                ),
+            }
+        )
+    except (GitHubWorksheetError, ValueError) as exc:
+        context["github_error"] = str(exc)
+    return context
 
 
 @router.get("/login", response_class=HTMLResponse)
@@ -397,14 +464,55 @@ def assignment_new_page(
     return templates.TemplateResponse(
         request=request,
         name="admin/assignment_new.html",
-        context={
-            "title": "Add Assignment",
-            "form": {
+        context=_assignment_form_context(
+            {
+                "source": "upload",
                 "periods": [],
                 "assigned_date": "",
                 "title": "",
                 "description": "",
-            },
+                "github_repo": "",
+                "github_path": "",
+            }
+        ),
+    )
+
+
+@router.get("/assignments/new/github-browse", response_class=HTMLResponse)
+def assignment_github_browse(
+    request: Request,
+    repo: str = Query(..., min_length=1),
+    path: str = "",
+    q: str | None = Query(default=None),
+    _admin: None = Depends(require_admin),
+) -> HTMLResponse:
+    """HTMX partial: choose a GitHub PDF for the Add Assignment form."""
+    if not settings.github_enabled:
+        return HTMLResponse(
+            "<p class='status-note error'>GitHub integration is not configured.</p>",
+            status_code=503,
+        )
+
+    try:
+        allowed = list_filtered_repos()
+        assert_repo_allowed(repo, allowed)
+        browse = browse_pdf_worksheets(repo, path=path, query=q)
+    except (GitHubWorksheetError, ValueError) as exc:
+        return HTMLResponse(
+            f"<p class='status-note error'>{escape(str(exc))}</p>",
+            status_code=400,
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/_worksheet_list.html",
+        context={
+            "repo": repo,
+            "browse": browse,
+            "search_query": q or "",
+            "browser_mode": "assignment",
+            "browse_url": "/admin/assignments/new/github-browse",
+            "repo_field_id": "assignment-github-repo",
         },
     )
 
@@ -412,39 +520,89 @@ def assignment_new_page(
 @router.post("/assignments/new")
 async def assignment_new_submit(
     request: Request,
+    source: str = Form("upload"),
     periods: list[int] = Form(default=[]),
     assigned_date: str = Form(...),
     title: str = Form(...),
     description: str = Form(""),
-    pdf: UploadFile = File(...),
+    pdf: UploadFile | None = File(default=None),
+    github_repo: str = Form(""),
+    github_path: str = Form(""),
     _admin: None = Depends(require_admin),
     db=Depends(get_db),
 ):
     form = {
+        "source": source,
         "periods": periods,
         "assigned_date": assigned_date,
         "title": title,
         "description": description,
+        "github_repo": github_repo,
+        "github_path": github_path,
     }
 
     try:
-        pdf_bytes = await pdf.read()
-        if not pdf_bytes:
-            raise ValueError("PDF file is empty.")
-        create_assignment(
-            db,
-            periods=periods,
-            assigned_date=assigned_date,
-            title=title,
-            description=description.strip() or None,
-            pdf_bytes=pdf_bytes,
-            original_filename=pdf.filename or "assignment.pdf",
-        )
+        if not title.strip():
+            raise ValueError("Title is required.")
+        if source == "upload":
+            if pdf is None or not pdf.filename:
+                raise ValueError("Choose a PDF file from this computer.")
+            pdf_bytes = await pdf.read()
+            create_assignment(
+                db,
+                periods=periods,
+                assigned_date=assigned_date,
+                title=title,
+                description=description.strip() or None,
+                pdf_bytes=pdf_bytes,
+                original_filename=pdf.filename,
+            )
+        elif source == "github":
+            if not settings.github_enabled:
+                raise ValueError("GitHub integration is not configured.")
+            validate_worksheet_locator(github_repo, github_path)
+            allowed = list_filtered_repos()
+            assert_repo_allowed(github_repo, allowed)
+
+            existing_id = find_github_assignment(
+                db,
+                github_repo,
+                github_path,
+                assigned_date.strip(),
+            )
+            if existing_id is not None:
+                add_periods_to_assignment(db, existing_id, periods)
+                existing_pdf = get_assignment_pdf_path(existing_id)
+                if not existing_pdf.exists():
+                    pdf_bytes = fetch_pdf_bytes(github_repo, github_path)
+                    if not pdf_bytes:
+                        raise ValueError("GitHub returned an empty PDF file.")
+                    write_assignment_pdf(existing_id, pdf_bytes)
+                db.commit()
+            else:
+                pdf_bytes = fetch_pdf_bytes(github_repo, github_path)
+                if not pdf_bytes:
+                    raise ValueError("GitHub returned an empty PDF file.")
+                create_assignment(
+                    db,
+                    periods=periods,
+                    assigned_date=assigned_date,
+                    title=title,
+                    description=description.strip() or None,
+                    pdf_bytes=pdf_bytes,
+                    original_filename=Path(github_path).name,
+                    source="github",
+                    github_repo=github_repo,
+                    github_path=github_path,
+                )
+        else:
+            raise ValueError("Choose either a local upload or a GitHub worksheet.")
     except Exception as exc:  # noqa: BLE001 — teacher-friendly UI message
+        db.rollback()
         return templates.TemplateResponse(
             request=request,
             name="admin/assignment_new.html",
-            context={"title": "Add Assignment", "form": form, "error": str(exc)},
+            context=_assignment_form_context(form, error=str(exc)),
             status_code=400,
         )
 
