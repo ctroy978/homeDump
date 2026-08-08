@@ -40,6 +40,15 @@ def test_normalize_text_apostrophes() -> None:
     assert normalize_text("Nurse\u2019s Office") == "Nurse's Office"
 
 
+def _test_student_id(db_conn: sqlite3.Connection) -> int:
+    row = db_conn.execute(
+        "SELECT id FROM students WHERE sis_number = ?",
+        ("10001",),
+    ).fetchone()
+    assert row is not None
+    return int(row["id"])
+
+
 @pytest.mark.parametrize(
     ("period", "absence_date", "eligible", "code"),
     [
@@ -58,22 +67,54 @@ def test_check_eligibility(
     eligible: bool,
     code: str,
 ) -> None:
-    result = check_eligibility(db_conn, "Test Student A", period, absence_date)
+    result = check_eligibility(
+        db_conn, _test_student_id(db_conn), period, absence_date
+    )
     assert isinstance(result, EligibilityResult)
     assert result.eligible is eligible
     assert result.absence_code == code
+    assert result.student_name == "Test Student A"
 
 
 def test_check_eligibility_missing_record(db_conn: sqlite3.Connection) -> None:
-    result = check_eligibility(db_conn, "Test Student A", 5, "2025-01-01")
+    result = check_eligibility(db_conn, _test_student_id(db_conn), 5, "2025-01-01")
     assert result.eligible is False
     assert result.absence_code is None
     assert "No absence record" in result.reason
 
 
 def test_check_eligibility_unknown_student(db_conn: sqlite3.Connection) -> None:
-    result = check_eligibility(db_conn, "Nobody Here", 1, "2025-10-20")
+    result = check_eligibility(db_conn, 999_999, 1, "2025-10-20")
     assert result.eligible is False
+    assert "not found" in result.reason.lower()
+
+
+def test_check_eligibility_same_name_different_sis(
+    db_conn: sqlite3.Connection,
+) -> None:
+    """Eligibility is tied to student_id, not display name."""
+    from app.services.attendance_parser import upsert_student
+
+    other_id = upsert_student(db_conn, "Test Student A", "10", "20002")
+    db_conn.execute(
+        """
+        INSERT INTO attendance_records (
+            student_id, absence_date, period, absence_code
+        ) VALUES (?, '2025-09-29', 0, 'Unexcused Absence')
+        """,
+        (other_id,),
+    )
+    db_conn.commit()
+
+    original = check_eligibility(
+        db_conn, _test_student_id(db_conn), 0, "2025-09-29"
+    )
+    assert original.eligible is True
+    assert original.absence_code == "Family Emergency"
+
+    other = check_eligibility(db_conn, other_id, 0, "2025-09-29")
+    assert other.eligible is False
+    assert other.absence_code == "Unexcused Absence"
 
 
 def test_fixture_sparse_period_mapping(fixture_db_path: Path | None) -> None:
@@ -102,7 +143,11 @@ def test_fixture_sparse_period_mapping(fixture_db_path: Path | None) -> None:
 
     conn = sqlite3.connect(fixture_db_path)
     conn.row_factory = sqlite3.Row
-    result = check_eligibility(conn, "Test Student A", 3, "2025-09-02")
+    student = conn.execute(
+        "SELECT id FROM students WHERE name = 'Test Student A'"
+    ).fetchone()
+    assert student is not None
+    result = check_eligibility(conn, int(student["id"]), 3, "2025-09-02")
     conn.close()
     assert result.eligible is False
     assert result.absence_code == "Unexcused Absence"

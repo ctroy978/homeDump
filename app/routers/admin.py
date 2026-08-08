@@ -90,7 +90,12 @@ def _admin_summary(db) -> dict[str, int]:
     }
 
 
-def _attendance_page_context(db, error: str | None = None) -> dict:
+def _attendance_page_context(
+    db,
+    error: str | None = None,
+    *,
+    import_result=None,
+) -> dict:
     uploads = db.execute(
         """
         SELECT id, filename, uploaded_at, row_count
@@ -100,12 +105,14 @@ def _attendance_page_context(db, error: str | None = None) -> dict:
         """
     ).fetchall()
     summary = _admin_summary(db)
-    return {
+    context = {
         "title": "Upload Attendance",
         "uploads": uploads,
         "error": error,
+        "import_result": import_result,
         **summary,
     }
+    return context
 
 
 def _set_admin_cookie(response: RedirectResponse) -> None:
@@ -312,14 +319,11 @@ async def upload_attendance(
             status_code=400,
         )
 
-    return RedirectResponse(
-        url=(
-            f"/admin/attendance?success=1"
-            f"&records={result.records_upserted}"
-            f"&cleared={result.records_cleared}"
-            f"&students={result.students_touched}"
-        ),
-        status_code=303,
+    # Render result in-page so rejection details (names / reasons) are visible.
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/attendance.html",
+        context=_attendance_page_context(db, import_result=result),
     )
 
 

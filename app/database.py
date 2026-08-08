@@ -13,7 +13,7 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS students (
     id INTEGER PRIMARY KEY,
     sis_number TEXT,
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     grade TEXT,
     last_attendance_upload_id INTEGER REFERENCES attendance_uploads(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -100,6 +100,78 @@ def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {str(row[1]) for row in rows}
 
 
+def _students_has_unique_name_constraint(conn: sqlite3.Connection) -> bool:
+    """True when an older schema enforced UNIQUE on students.name."""
+    for index in conn.execute("PRAGMA index_list(students)").fetchall():
+        # index: seq, name, unique, origin, partial
+        if not index[2]:
+            continue
+        index_name = str(index[1])
+        cols = [
+            str(row[2])
+            for row in conn.execute(f"PRAGMA index_info('{index_name}')").fetchall()
+        ]
+        if cols == ["name"]:
+            return True
+    create_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'students'"
+    ).fetchone()
+    if create_sql and create_sql[0]:
+        normalized = " ".join(str(create_sql[0]).upper().split())
+        if "NAME TEXT NOT NULL UNIQUE" in normalized:
+            return True
+    return False
+
+
+def _rebuild_students_without_unique_name(conn: sqlite3.Connection) -> None:
+    """Recreate students so display names may collide; SIS remains the unique key."""
+    # Foreign keys block DROP TABLE students while attendance_records reference it.
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("DROP TABLE IF EXISTS students_new")
+        conn.execute(
+            """
+            CREATE TABLE students_new (
+                id INTEGER PRIMARY KEY,
+                sis_number TEXT,
+                name TEXT NOT NULL,
+                grade TEXT,
+                last_attendance_upload_id INTEGER REFERENCES attendance_uploads(id),
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        columns = _table_columns(conn, "students")
+        select_bits = [
+            "id",
+            "sis_number" if "sis_number" in columns else "NULL AS sis_number",
+            "name",
+            "grade" if "grade" in columns else "NULL AS grade",
+            (
+                "last_attendance_upload_id"
+                if "last_attendance_upload_id" in columns
+                else "NULL AS last_attendance_upload_id"
+            ),
+            (
+                "created_at"
+                if "created_at" in columns
+                else "datetime('now') AS created_at"
+            ),
+        ]
+        conn.execute(
+            f"""
+            INSERT INTO students_new (
+                id, sis_number, name, grade, last_attendance_upload_id, created_at
+            )
+            SELECT {", ".join(select_bits)} FROM students
+            """
+        )
+        conn.execute("DROP TABLE students")
+        conn.execute("ALTER TABLE students_new RENAME TO students")
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+
+
 def _apply_migrations(conn: sqlite3.Connection) -> None:
     """Add columns and tables introduced after the initial schema."""
     student_columns = _table_columns(conn, "students")
@@ -113,6 +185,9 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             REFERENCES attendance_uploads(id)
             """
         )
+    if _students_has_unique_name_constraint(conn):
+        _rebuild_students_without_unique_name(conn)
+
     conn.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_students_sis_number

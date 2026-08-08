@@ -1,4 +1,4 @@
-"""Tests for attendance import and cohort replacement."""
+"""Tests for attendance import: SIS identity, isolation, rejections."""
 
 from __future__ import annotations
 
@@ -9,11 +9,39 @@ import pandas as pd
 
 from app.database import init_schema
 from app.services.attendance_parser import (
+    MISSING_SIS_MESSAGE,
     find_header_row_index,
     ingest_attendance_file,
     load_attendance_dataframe,
     upsert_student,
 )
+
+
+def _base_row(
+    *,
+    name: str,
+    sis: str,
+    date: str = "2025-09-02",
+    period3: str = "",
+    period5: str = "",
+    grade: object = 10,
+    note: str = "",
+) -> dict[str, object]:
+    return {
+        "Student Name": name,
+        "Sis Number": sis,
+        "Grade": grade,
+        "Date": date,
+        "Period 0": "",
+        "Period 1": "",
+        "Period 2": "",
+        "Period 3": period3,
+        "Period 4": "",
+        "Period 5": period5,
+        "Period 6": "",
+        "Period 7": "",
+        "Note": note,
+    }
 
 
 def _write_fixture(path: Path, rows: list[dict[str, object]]) -> None:
@@ -37,6 +65,19 @@ def _count_records(conn: sqlite3.Connection, student_name: str) -> int:
     return int(row["total"])
 
 
+def _count_by_sis(conn: sqlite3.Connection, sis: str) -> int:
+    row = conn.execute(
+        """
+        SELECT COUNT(*) AS total
+        FROM attendance_records ar
+        JOIN students s ON s.id = ar.student_id
+        WHERE s.sis_number = ?
+        """,
+        (sis,),
+    ).fetchone()
+    return int(row["total"])
+
+
 def _record_code(
     conn: sqlite3.Connection,
     student_name: str,
@@ -55,50 +96,30 @@ def _record_code(
     return None if row is None else str(row["absence_code"])
 
 
-def test_cohort_replace_updates_late_excused_note(tmp_path: Path) -> None:
+def _memory_db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
     init_schema(conn)
+    return conn
 
+
+def test_cohort_replace_updates_late_excused_note(tmp_path: Path) -> None:
+    conn = _memory_db()
     first = tmp_path / "period3.txt"
     _write_fixture(
         first,
-        [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Unexcused Absence",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
-        ],
+        [_base_row(name="Alice Example", sis="1001", period3="Unexcused Absence")],
     )
-
     second = tmp_path / "period3_updated.txt"
     _write_fixture(
         second,
         [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Excused Absence",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "Parent note received",
-            }
+            _base_row(
+                name="Alice Example",
+                sis="1001",
+                period3="Excused Absence",
+                note="Parent note received",
+            )
         ],
     )
 
@@ -113,49 +134,22 @@ def test_cohort_replace_updates_late_excused_note(tmp_path: Path) -> None:
 
 
 def test_class_uploads_do_not_wipe_other_classes(tmp_path: Path) -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    init_schema(conn)
-
+    conn = _memory_db()
     period3 = tmp_path / "period3.txt"
     _write_fixture(
         period3,
-        [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Illness",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
-        ],
+        [_base_row(name="Alice Example", sis="1001", period3="Illness")],
     )
-
     period5 = tmp_path / "period5.txt"
     _write_fixture(
         period5,
         [
-            {
-                "Student Name": "Bob Example",
-                "Grade": 10,
-                "Date": "2025-09-10",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "",
-                "Period 4": "",
-                "Period 5": "Sports-Athletics",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
+            _base_row(
+                name="Bob Example",
+                sis="2002",
+                date="2025-09-10",
+                period5="Sports-Athletics",
+            )
         ],
     )
 
@@ -168,22 +162,7 @@ def test_class_uploads_do_not_wipe_other_classes(tmp_path: Path) -> None:
     updated_period3 = tmp_path / "period3_refresh.txt"
     _write_fixture(
         updated_period3,
-        [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Excused Absence",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
-        ],
+        [_base_row(name="Alice Example", sis="1001", period3="Excused Absence")],
     )
     ingest_attendance_file(conn, updated_period3, updated_period3.name)
 
@@ -192,64 +171,24 @@ def test_class_uploads_do_not_wipe_other_classes(tmp_path: Path) -> None:
 
 
 def test_removed_absence_is_cleared_on_reupload(tmp_path: Path) -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    init_schema(conn)
-
+    conn = _memory_db()
     first = tmp_path / "with_absence.txt"
     _write_fixture(
         first,
         [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Illness",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            },
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-03",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Illness",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            },
+            _base_row(name="Alice Example", sis="1001", period3="Illness"),
+            _base_row(
+                name="Alice Example",
+                sis="1001",
+                date="2025-09-03",
+                period3="Illness",
+            ),
         ],
     )
-
     second = tmp_path / "one_day_only.txt"
     _write_fixture(
         second,
-        [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Illness",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
-        ],
+        [_base_row(name="Alice Example", sis="1001", period3="Illness")],
     )
 
     ingest_attendance_file(conn, first, first.name)
@@ -262,51 +201,23 @@ def test_removed_absence_is_cleared_on_reupload(tmp_path: Path) -> None:
 
 def test_student_move_periods_refreshes_from_new_class_export(tmp_path: Path) -> None:
     """A student who leaves Period 3 is refreshed when they appear in Period 5."""
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    init_schema(conn)
-
+    conn = _memory_db()
     period3 = tmp_path / "period3.txt"
     _write_fixture(
         period3,
-        [
-            {
-                "Sis Number": "1001",
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Illness",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
-        ],
+        [_base_row(name="Alice Example", sis="1001", period3="Illness")],
     )
-
     period5 = tmp_path / "period5.txt"
     _write_fixture(
         period5,
         [
-            {
-                "Sis Number": "1001",
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Excused Absence",
-                "Period 4": "",
-                "Period 5": "Sports-Athletics",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "Late parent note",
-            }
+            _base_row(
+                name="Alice Example",
+                sis="1001",
+                period3="Excused Absence",
+                period5="Sports-Athletics",
+                note="Late parent note",
+            )
         ],
     )
 
@@ -327,11 +238,8 @@ def test_student_move_periods_refreshes_from_new_class_export(tmp_path: Path) ->
 
 
 def test_student_with_no_codes_still_clears_old_records(tmp_path: Path) -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    init_schema(conn)
-
-    student_id = upsert_student(conn, "Alice Example", "10")
+    conn = _memory_db()
+    student_id = upsert_student(conn, "Alice Example", "10", sis_number="1001")
     conn.execute(
         """
         INSERT INTO attendance_records (
@@ -345,22 +253,7 @@ def test_student_with_no_codes_still_clears_old_records(tmp_path: Path) -> None:
     empty_export = tmp_path / "empty_year.txt"
     _write_fixture(
         empty_export,
-        [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
-        ],
+        [_base_row(name="Alice Example", sis="1001")],
     )
 
     result = ingest_attendance_file(conn, empty_export, empty_export.name)
@@ -374,18 +267,15 @@ def test_find_header_row_skips_preamble_lines() -> None:
         "Period 3 - Room 204\n"
         "\n"
         "Generated: 2025-09-15\n"
-        "Student Name\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\tPeriod 3\t"
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\tPeriod 3\t"
         "Period 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
-        "Alice Example\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Alice Example\t1001\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
     )
     assert find_header_row_index(text, "\t") == 4
 
 
 def test_text_export_with_preamble_parses_correctly(tmp_path: Path) -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    init_schema(conn)
-
+    conn = _memory_db()
     export = tmp_path / "period3_with_preamble.txt"
     export.write_text(
         "Jefferson High School\n"
@@ -415,35 +305,18 @@ def test_plain_header_export_still_parses(tmp_path: Path) -> None:
     export = tmp_path / "plain.txt"
     _write_fixture(
         export,
-        [
-            {
-                "Student Name": "Alice Example",
-                "Grade": 10,
-                "Date": "2025-09-02",
-                "Period 0": "",
-                "Period 1": "",
-                "Period 2": "",
-                "Period 3": "Illness",
-                "Period 4": "",
-                "Period 5": "",
-                "Period 6": "",
-                "Period 7": "",
-                "Note": "",
-            }
-        ],
+        [_base_row(name="Alice Example", sis="1001", period3="Illness")],
     )
 
     df = load_attendance_dataframe(export)
     assert find_header_row_index(export.read_text(encoding="utf-8"), "\t") == 0
-    assert list(df.columns)[:3] == ["Student Name", "Grade", "Date"]
+    assert "Student Name" in list(df.columns)
+    assert "Sis Number" in list(df.columns)
     assert len(df) == 1
 
 
 def test_quoted_column_headers_from_live_export(tmp_path: Path) -> None:
-    conn = sqlite3.connect(":memory:")
-    conn.row_factory = sqlite3.Row
-    init_schema(conn)
-
+    conn = _memory_db()
     export = tmp_path / "live_format.txt"
     export.write_text(
         'School Name\tSchool Year\t"Student Name"\t"Legal Formatted Name"\t'
@@ -476,3 +349,188 @@ def test_missing_header_row_raises_clear_error(tmp_path: Path) -> None:
         assert "Could not find attendance header row" in str(exc)
     else:
         raise AssertionError("Expected ValueError for missing header row")
+
+
+def test_same_display_name_different_sis_both_import(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "twins.txt"
+    _write_fixture(
+        export,
+        [
+            _base_row(name="Jordan Lee", sis="1", period3="Illness"),
+            _base_row(name="Jordan Lee", sis="2", period3="Excused Absence"),
+        ],
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 2
+    assert result.students_rejected == 0
+    assert result.records_upserted == 2
+
+    rows = conn.execute(
+        "SELECT sis_number, name FROM students ORDER BY sis_number"
+    ).fetchall()
+    assert [(r["sis_number"], r["name"]) for r in rows] == [
+        ("1", "Jordan Lee"),
+        ("2", "Jordan Lee"),
+    ]
+    assert _count_by_sis(conn, "1") == 1
+    assert _count_by_sis(conn, "2") == 1
+
+
+def test_missing_sis_rejects_but_others_import(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "partial.txt"
+    # Write as text so empty SIS does not force a float column on other IDs.
+    export.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Alex Rivera\t\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Carol Good\t3003\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 1
+    assert result.students_rejected == 1
+    assert result.records_upserted == 1
+    assert any(
+        r.name == "Alex Rivera" and MISSING_SIS_MESSAGE in r.reason
+        for r in result.rejections
+    )
+    assert _count_records(conn, "Carol Good") == 1
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) AS c FROM students WHERE name = ?",
+            ("Alex Rivera",),
+        ).fetchone()["c"]
+        == 0
+    )
+
+
+def test_duplicate_sis_in_file_last_write_wins(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "dup_sis.txt"
+    _write_fixture(
+        export,
+        [
+            _base_row(name="Alice Old", sis="1001", period3="Illness"),
+            _base_row(
+                name="Alice New",
+                sis="1001",
+                period3="Excused Absence",
+                note="Updated",
+            ),
+        ],
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 1
+    row = conn.execute(
+        "SELECT name, sis_number FROM students WHERE sis_number = '1001'"
+    ).fetchone()
+    assert row["name"] == "Alice New"
+    assert _record_code(conn, "Alice New", "2025-09-02", 3) == "Excused Absence"
+
+
+def test_garbage_dates_do_not_wipe_existing_attendance(tmp_path: Path) -> None:
+    conn = _memory_db()
+    good = tmp_path / "good.txt"
+    _write_fixture(
+        good,
+        [
+            _base_row(name="Dave", sis="4004", period3="Illness"),
+            _base_row(name="Carol", sis="3003", period3="Illness"),
+        ],
+    )
+    ingest_attendance_file(conn, good, good.name)
+    assert _count_by_sis(conn, "4004") == 1
+
+    bad = tmp_path / "bad_dates.txt"
+    _write_fixture(
+        bad,
+        [
+            {
+                **_base_row(name="Dave", sis="4004", period3="Illness"),
+                "Date": "???",
+            },
+            _base_row(name="Carol", sis="3003", period3="Excused Absence"),
+        ],
+    )
+    result = ingest_attendance_file(conn, bad, bad.name)
+
+    assert _count_by_sis(conn, "4004") == 1  # preserved
+    assert _record_code(conn, "Carol", "2025-09-02", 3) == "Excused Absence"
+    assert any(r.sis_number == "4004" for r in result.rejections)
+    assert result.students_touched == 1
+
+
+def test_decimal_sis_is_rejected(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "decimal.txt"
+    # Non-integer decimal cannot be a real student ID (integer-looking floats
+    # from pandas/Excel are accepted as whole numbers).
+    export.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Floaty\t12.34\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Ok\t9999\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 1
+    assert result.students_rejected == 1
+    assert _count_by_sis(conn, "9999") == 1
+    assert any("decimal" in r.reason.lower() for r in result.rejections)
+
+
+def test_parse_sis_cell_whole_number_float_and_string_decimal() -> None:
+    from app.services.attendance_parser import _parse_sis_cell
+
+    assert _parse_sis_cell(12345.0) == ("12345", None)
+    assert _parse_sis_cell(12345) == ("12345", None)
+    assert _parse_sis_cell(" 10001 ") == ("10001", None)
+    sis, err = _parse_sis_cell("12345.0")
+    assert sis is None and err is not None and "decimal" in err.lower()
+    sis, err = _parse_sis_cell(12.5)
+    assert sis is None and err is not None
+
+
+def test_require_sis_number_column(tmp_path: Path) -> None:
+    export = tmp_path / "no_sis_col.txt"
+    df = pd.DataFrame(
+        [
+            {
+                "Student Name": "Alice",
+                "Grade": 10,
+                "Date": "2025-09-02",
+                "Period 0": "",
+                "Period 1": "",
+                "Period 2": "",
+                "Period 3": "Illness",
+                "Period 4": "",
+                "Period 5": "",
+                "Period 6": "",
+                "Period 7": "",
+                "Note": "",
+            }
+        ]
+    )
+    df.to_csv(export, sep="\t", index=False)
+    conn = _memory_db()
+    try:
+        ingest_attendance_file(conn, export, export.name)
+    except ValueError as exc:
+        assert "Sis Number" in str(exc)
+    else:
+        raise AssertionError("Expected missing Sis Number column to fail")
+
+
+def test_names_may_collide_in_schema() -> None:
+    conn = _memory_db()
+    id1 = upsert_student(conn, "Jordan Lee", "10", "1")
+    id2 = upsert_student(conn, "Jordan Lee", "11", "2")
+    conn.commit()
+    assert id1 != id2
+    count = conn.execute("SELECT COUNT(*) AS c FROM students").fetchone()["c"]
+    assert count == 2

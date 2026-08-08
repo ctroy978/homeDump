@@ -9,17 +9,45 @@
   <h2>Upload Attendance</h2>
   <p>
     Upload a year-to-date attendance export for <strong>one class at a time</strong>
-    (<strong>.txt</strong> or <strong>.xlsx</strong>). The file must include a
-    <strong>Student Name</strong> column and <strong>Period 0</strong> through
-    <strong>Period 7</strong> columns.
+    (<strong>.txt</strong> or <strong>.xlsx</strong>). The file must include
+    <strong>Student Name</strong>, <strong>Sis Number</strong>, and
+    <strong>Period 0</strong> through <strong>Period 7</strong> columns.
   </p>
   <p class="help-text">
-    Each student in the file gets their attendance fully refreshed — matched by
-    <strong>SIS number</strong> when present, otherwise by name. Upload one class
-    export at a time; students not in the file are left unchanged. If a student
-    moves from Period 3 to Period 5, upload the export from their
+    Each student is identified by <strong>student ID (SIS number)</strong> only —
+    display names may be shared. Students without a SIS are skipped and listed below
+    so you can fix their ID and re-upload. Students not in the file are left unchanged.
+    If a student moves from Period 3 to Period 5, upload the export from their
     <strong>new</strong> class to pick up schedule changes and late notes.
   </p>
+
+  {% if import_result %}
+  <p class="status-note success">
+    Upload complete —
+    {{ import_result.records_upserted }} absence record(s) saved for
+    {{ import_result.students_touched }} student(s).
+    {% if import_result.records_cleared %}
+    Replaced {{ import_result.records_cleared }} previous record(s)
+    across the updated students.
+    {% endif %}
+    {% if import_result.rows_skipped %}
+    Skipped {{ import_result.rows_skipped }} empty or incomplete row(s).
+    {% endif %}
+  </p>
+  {% if import_result.rejections %}
+  <div class="status-note error">
+    <p>
+      <strong>{{ import_result.students_rejected }}</strong> student(s) were not
+      imported. Fix their data in the source system and re-upload this class:
+    </p>
+    <ul>
+      {% for item in import_result.rejections %}
+      <li>{{ item.display() }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% endif %}
 
   {% if request.query_params.get('success') %}
   <p class="status-note success">
@@ -38,7 +66,7 @@
   {% endif %}
 
   <form class="upload-form" action="/admin/attendance/upload" method="post" enctype="multipart/form-data">
-    <label for="file">Attendance Excel file</label>
+    <label for="file">Attendance export file</label>
     <input id="file" name="file" type="file" accept=".txt,.tsv,.csv,.xlsx,.xlsm,.xls" required>
     <button type="submit">Upload and import</button>
   </form>

@@ -23,14 +23,44 @@ PERIOD_HEADER_RE = re.compile(r"^Period\s*(\d)$", re.IGNORECASE)
 EXCEL_EPOCH = datetime(1899, 12, 30)
 
 
+MISSING_SIS_MESSAGE = (
+    "Missing student ID (SIS number). Add their SIS in the attendance export "
+    "and re-upload this class."
+)
+INVALID_SIS_DECIMAL_MESSAGE = (
+    "Student ID must not contain a decimal point. Check the SIS number in the export."
+)
+NO_USABLE_ROWS_MESSAGE = (
+    "No usable attendance rows for this student (check dates in the export). "
+    "Existing records were left unchanged."
+)
+
+
 @dataclass(frozen=True)
 class StudentRosterEntry:
-    """One student found in an attendance export."""
+    """One student found in an attendance export (keyed by SIS)."""
 
     key: str
     name: str
     grade: str | None
+    sis_number: str
+
+
+@dataclass(frozen=True)
+class StudentImportRejection:
+    """One student (or name-only row) that could not be imported."""
+
+    reason: str
+    name: str | None = None
     sis_number: str | None = None
+
+    def display(self) -> str:
+        who = self.name or self.sis_number or "Unknown student"
+        if self.name and self.sis_number:
+            who = f"{self.name} (SIS {self.sis_number})"
+        elif self.sis_number and not self.name:
+            who = f"SIS {self.sis_number}"
+        return f"{who} — {self.reason}"
 
 
 @dataclass
@@ -43,8 +73,10 @@ class AttendanceParseResult:
     records_upserted: int = 0
     records_cleared: int = 0
     students_touched: int = 0
+    students_rejected: int = 0
     rows_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
+    rejections: list[StudentImportRejection] = field(default_factory=list)
 
 
 def parse_excel_date(value: object) -> str | None:
@@ -87,6 +119,42 @@ def _normalize_code(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _parse_sis_cell(value: object) -> tuple[str | None, str | None]:
+    """
+    Normalize a SIS cell from an export.
+
+    Returns ``(sis_number, error_message)``. When the cell is blank,
+    both are None. When invalid, sis is None and error_message is set.
+
+    Whole-number floats (common when pandas infers a numeric column) become
+    integer strings without a decimal. String values that already contain '.'
+    are rejected.
+    """
+    if value is None:
+        return None, None
+    try:
+        if pd.isna(value):
+            return None, None
+    except (TypeError, ValueError):
+        pass
+
+    if isinstance(value, bool):
+        return str(value).strip() or None, None
+    if isinstance(value, int):
+        return str(value), None
+    if isinstance(value, float):
+        if value.is_integer():
+            return str(int(value)), None
+        return None, INVALID_SIS_DECIMAL_MESSAGE
+
+    text = str(value).strip()
+    if not text:
+        return None, None
+    if "." in text:
+        return None, INVALID_SIS_DECIMAL_MESSAGE
+    return text, None
 
 
 def _normalize_column_label(value: object) -> str:
@@ -233,11 +301,22 @@ def load_attendance_dataframe(path: Path) -> pd.DataFrame:
     return df
 
 
-def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], int]:
+def parse_attendance_rows(
+    df: pd.DataFrame,
+) -> tuple[
+    list[dict[str, object]],
+    int,
+    dict[str, int],
+    dict[str, StudentRosterEntry],
+    list[StudentImportRejection],
+]:
     """
-    Turn a workbook dataframe into normalized row dicts.
+    Turn a workbook dataframe into normalized row dicts and a SIS roster.
 
     Each output row represents one student/date/period absence code.
+    Students are keyed only by SIS number. Missing/invalid SIS rows become
+    rejections. ``parseable_dates_by_sis`` counts rows with a valid date per SIS
+    (even when all period codes are empty).
     """
     columns = list(df.columns)
     period_columns = _find_period_columns(columns)
@@ -247,31 +326,76 @@ def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], in
     date_col = _require_column(columns, "Date")
     note_col = _optional_column(columns, "Note")
     grade_col = _optional_column(columns, "Grade")
-    sis_col = _optional_column(columns, "Sis Number")
+    sis_col = _require_column(columns, "Sis Number")
 
-    name_col = None
-    if "student name" in [c.lower() for c in columns]:
-        name_col = _require_column(columns, "Student Name")
-    else:
+    if "student name" not in [c.lower() for c in columns]:
         raise ValueError(
             "Missing 'Student Name' column. The export must include student names, "
             "or use the anonymized test fixture from scripts/build_test_fixture.py."
         )
+    name_col = _require_column(columns, "Student Name")
 
     parsed_rows: list[dict[str, object]] = []
     rows_skipped = 0
+    parseable_dates_by_sis: dict[str, int] = {}
+    roster: dict[str, StudentRosterEntry] = {}
+    rejections: list[StudentImportRejection] = []
+    rejected_missing_names: set[str] = set()
+    rejected_invalid_sis: set[str] = set()
 
     for _, row in df.iterrows():
         student_name = _normalize_code(row.get(name_col))
         absence_date = parse_excel_date(row.get(date_col))
-        if not student_name or not absence_date:
+        sis_number, sis_error = _parse_sis_cell(row.get(sis_col))
+        grade = _normalize_grade(row.get(grade_col)) if grade_col else None
+        note = _normalize_code(row.get(note_col)) if note_col else None
+
+        if sis_error is not None:
+            marker = f"{student_name or ''}|{sis_error}"
+            if marker not in rejected_invalid_sis:
+                rejected_invalid_sis.add(marker)
+                rejections.append(
+                    StudentImportRejection(
+                        reason=sis_error,
+                        name=student_name,
+                        sis_number=_normalize_code(row.get(sis_col)),
+                    )
+                )
             rows_skipped += 1
             continue
 
-        grade = _normalize_grade(row.get(grade_col)) if grade_col else None
-        note = _normalize_code(row.get(note_col)) if note_col else None
-        sis_number = _normalize_code(row.get(sis_col)) if sis_col else None
-        student_key = sis_number or student_name
+        if not sis_number:
+            if student_name and student_name not in rejected_missing_names:
+                rejected_missing_names.add(student_name)
+                rejections.append(
+                    StudentImportRejection(
+                        reason=MISSING_SIS_MESSAGE,
+                        name=student_name,
+                    )
+                )
+            rows_skipped += 1
+            continue
+
+        if not student_name:
+            rows_skipped += 1
+            continue
+
+        # Last write wins for name; keep prior grade when this row omits it.
+        # Include the student even when the date is unparseable so we can refuse
+        # to wipe existing attendance with an empty refresh.
+        existing = roster.get(sis_number)
+        roster[sis_number] = StudentRosterEntry(
+            key=sis_number,
+            name=student_name,
+            grade=grade if grade is not None else (existing.grade if existing else None),
+            sis_number=sis_number,
+        )
+
+        if not absence_date:
+            rows_skipped += 1
+            continue
+
+        parseable_dates_by_sis[sis_number] = parseable_dates_by_sis.get(sis_number, 0) + 1
 
         row_had_code = False
         for column, period in period_columns.items():
@@ -281,7 +405,7 @@ def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], in
             row_had_code = True
             parsed_rows.append(
                 {
-                    "student_key": student_key,
+                    "student_key": sis_number,
                     "student_name": student_name,
                     "sis_number": sis_number,
                     "grade": grade,
@@ -295,117 +419,67 @@ def parse_attendance_rows(df: pd.DataFrame) -> tuple[list[dict[str, object]], in
         if not row_had_code:
             rows_skipped += 1
 
-    return parsed_rows, rows_skipped
+    return parsed_rows, rows_skipped, parseable_dates_by_sis, roster, rejections
 
 
 def student_identity_key(name: str, sis_number: str | None) -> str:
-    """Stable per-student key; SIS number wins when the export includes it."""
-    return sis_number or name
+    """Stable per-student key; SIS number is required for import identity."""
+    if not sis_number:
+        raise ValueError("SIS number is required for student identity.")
+    return sis_number
 
 
-def extract_students_from_dataframe(df: pd.DataFrame) -> dict[str, StudentRosterEntry]:
+def extract_students_from_dataframe(
+    df: pd.DataFrame,
+) -> tuple[dict[str, StudentRosterEntry], list[StudentImportRejection]]:
     """
-    Return every student appearing in the export.
+    Return every SIS-identified student in the export, plus rejections.
 
-    Each student is keyed by SIS number when present, otherwise by name. This
-    keeps schedule changes tied to the person, not the class roster upload.
+    Identity is SIS only. Display names may collide. Last row wins for name/grade
+    when the same SIS appears more than once.
     """
-    columns = list(df.columns)
-    name_col = _require_column(columns, "Student Name")
-    grade_col = _optional_column(columns, "Grade")
-    sis_col = _optional_column(columns, "Sis Number")
-
-    students: dict[str, StudentRosterEntry] = {}
-    for _, row in df.iterrows():
-        name = _normalize_code(row.get(name_col))
-        if not name:
-            continue
-        sis_number = _normalize_code(row.get(sis_col)) if sis_col else None
-        grade = _normalize_grade(row.get(grade_col)) if grade_col else None
-        key = student_identity_key(name, sis_number)
-        existing = students.get(key)
-        if existing is None:
-            students[key] = StudentRosterEntry(
-                key=key,
-                name=name,
-                grade=grade,
-                sis_number=sis_number,
-            )
-        elif grade is not None:
-            students[key] = StudentRosterEntry(
-                key=key,
-                name=name,
-                grade=grade,
-                sis_number=sis_number or existing.sis_number,
-            )
-    return students
+    _, _, _, roster, rejections = parse_attendance_rows(df)
+    return roster, rejections
 
 
 def upsert_student(
     conn: sqlite3.Connection,
     name: str,
     grade: str | None,
-    sis_number: str | None = None,
+    sis_number: str,
 ) -> int:
-    """Insert or update a student row and return its id."""
-    if sis_number:
-        by_sis = conn.execute(
-            "SELECT id FROM students WHERE sis_number = ?",
-            (sis_number,),
-        ).fetchone()
-        if by_sis is not None:
-            conn.execute(
-                """
-                UPDATE students
-                SET name = ?, grade = COALESCE(?, grade)
-                WHERE id = ?
-                """,
-                (name, grade, by_sis["id"]),
-            )
-            return int(by_sis["id"])
+    """Insert or update a student by SIS number and return its id."""
+    if not sis_number or not str(sis_number).strip():
+        raise ValueError("sis_number is required")
+    sis = str(sis_number).strip()
+    if "." in sis:
+        raise ValueError(INVALID_SIS_DECIMAL_MESSAGE)
 
-        by_name = conn.execute(
-            "SELECT id, sis_number FROM students WHERE name = ?",
-            (name,),
-        ).fetchone()
-        if by_name is not None and by_name["sis_number"] is None:
-            conn.execute(
-                """
-                UPDATE students
-                SET sis_number = ?, grade = COALESCE(?, grade)
-                WHERE id = ?
-                """,
-                (sis_number, grade, by_name["id"]),
-            )
-            return int(by_name["id"])
-
-        conn.execute(
-            "INSERT INTO students (sis_number, name, grade) VALUES (?, ?, ?)",
-            (sis_number, name, grade),
-        )
-    else:
+    by_sis = conn.execute(
+        "SELECT id FROM students WHERE sis_number = ?",
+        (sis,),
+    ).fetchone()
+    if by_sis is not None:
         conn.execute(
             """
-            INSERT INTO students (name, grade)
-            VALUES (?, ?)
-            ON CONFLICT(name) DO UPDATE SET
-                grade = COALESCE(excluded.grade, students.grade)
+            UPDATE students
+            SET name = ?, grade = COALESCE(?, grade)
+            WHERE id = ?
             """,
-            (name, grade),
+            (name, grade, by_sis["id"]),
         )
+        return int(by_sis["id"])
 
-    if sis_number:
-        row = conn.execute(
-            "SELECT id FROM students WHERE sis_number = ?",
-            (sis_number,),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT id FROM students WHERE name = ?",
-            (name,),
-        ).fetchone()
+    conn.execute(
+        "INSERT INTO students (sis_number, name, grade) VALUES (?, ?, ?)",
+        (sis, name, grade),
+    )
+    row = conn.execute(
+        "SELECT id FROM students WHERE sis_number = ?",
+        (sis,),
+    ).fetchone()
     if row is None:
-        raise RuntimeError(f"Failed to upsert student: {name}")
+        raise RuntimeError(f"Failed to upsert student SIS {sis}: {name}")
     return int(row["id"])
 
 
@@ -418,27 +492,33 @@ def _clear_attendance_for_student(conn: sqlite3.Connection, student_id: int) -> 
     return int(cursor.rowcount)
 
 
+def _existing_attendance_count(conn: sqlite3.Connection, student_id: int) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS total FROM attendance_records WHERE student_id = ?",
+        (student_id,),
+    ).fetchone()
+    return int(row["total"])
+
+
 def _records_for_student(
     parsed_rows: list[dict[str, object]],
     student_key: str,
+    student_id: int,
+    upload_id: int,
 ) -> dict[tuple[int, str, int], tuple[object, ...]]:
     """Collect deduplicated attendance rows for one student; last row wins."""
     records_by_key: dict[tuple[int, str, int], tuple[object, ...]] = {}
     for row in parsed_rows:
         if str(row["student_key"]) != student_key:
             continue
-        key = (
-            int(row["student_id"]),  # type: ignore[call-overload]
-            str(row["absence_date"]),
-            int(row["period"]),
-        )
+        key = (student_id, str(row["absence_date"]), int(row["period"]))
         records_by_key[key] = (
-            row["student_id"],
+            student_id,
             row["absence_date"],
             row["period"],
             row["absence_code"],
             row["note"],
-            row["upload_id"],
+            upload_id,
         )
     return records_by_key
 
@@ -455,13 +535,10 @@ def replace_attendance_for_student(
 
     Returns ``(records_cleared, records_inserted)``.
     """
-    for row in parsed_rows:
-        if str(row["student_key"]) == student_key:
-            row["student_id"] = student_id
-            row["upload_id"] = upload_id
-
+    records_by_key = _records_for_student(
+        parsed_rows, student_key, student_id, upload_id
+    )
     cleared = _clear_attendance_for_student(conn, student_id)
-    records_by_key = _records_for_student(parsed_rows, student_key)
 
     for values in records_by_key.values():
         conn.execute(
@@ -485,6 +562,45 @@ def replace_attendance_for_student(
     return cleared, len(records_by_key)
 
 
+def _import_one_student(
+    conn: sqlite3.Connection,
+    entry: StudentRosterEntry,
+    parsed_rows: list[dict[str, object]],
+    parseable_dates: int,
+    upload_id: int,
+) -> tuple[int, int]:
+    """
+    Upsert one student and replace their attendance.
+
+    Raises ValueError when the refresh would wipe existing data with no usable
+    rows (unparseable dates only).
+    """
+    existing = conn.execute(
+        "SELECT id FROM students WHERE sis_number = ?",
+        (entry.sis_number,),
+    ).fetchone()
+    prior_count = (
+        _existing_attendance_count(conn, int(existing["id"])) if existing else 0
+    )
+
+    if prior_count > 0 and parseable_dates == 0:
+        raise ValueError(NO_USABLE_ROWS_MESSAGE)
+
+    student_id = upsert_student(
+        conn,
+        entry.name,
+        entry.grade,
+        entry.sis_number,
+    )
+    return replace_attendance_for_student(
+        conn,
+        student_id,
+        parsed_rows,
+        entry.key,
+        upload_id,
+    )
+
+
 def ingest_attendance_file(
     conn: sqlite3.Connection,
     source_path: Path,
@@ -493,51 +609,60 @@ def ingest_attendance_file(
     """
     Parse an attendance workbook and write normalized rows to SQLite.
 
-    Student replace strategy: the file may contain one class roster, but each
-    student is handled independently. When a student appears in an upload,
-    all of their attendance is cleared and reloaded from that file's
-    year-to-date rows. Other students are untouched.
+    Identity is SIS number only (names may collide). Each student is committed
+    independently so one failure does not block the rest of the class file.
 
-    This supports importing one class at a time and schedule changes: a student
-    who moves from Period 3 to Period 5 is refreshed the next time they appear
-    in the Period 5 export (matched by SIS number when available).
+    When a student appears in an upload, their attendance is cleared and
+    reloaded from that file's year-to-date rows. Other students are untouched.
+    Students without a SIS are rejected with a teacher-facing message.
     """
     df = load_attendance_dataframe(source_path)
-    parsed_rows, rows_skipped = parse_attendance_rows(df)
+    (
+        parsed_rows,
+        rows_skipped,
+        parseable_dates_by_sis,
+        roster,
+        rejections,
+    ) = parse_attendance_rows(df)
 
     cursor = conn.execute(
         "INSERT INTO attendance_uploads (filename, row_count) VALUES (?, ?)",
         (original_filename, len(df)),
     )
     upload_id = int(cursor.lastrowid)
+    # Persist the upload metadata even if every student is later rejected.
+    conn.commit()
 
     result = AttendanceParseResult(
         upload_id=upload_id,
         filename=original_filename,
         rows_read=len(df),
+        rows_skipped=rows_skipped,
+        rejections=list(rejections),
     )
 
-    roster = extract_students_from_dataframe(df)
-
     for entry in roster.values():
-        student_id = upsert_student(
-            conn,
-            entry.name,
-            entry.grade,
-            entry.sis_number,
-        )
-        cleared, inserted = replace_attendance_for_student(
-            conn,
-            student_id,
-            parsed_rows,
-            entry.key,
-            upload_id,
-        )
-        result.records_cleared += cleared
-        result.records_upserted += inserted
+        try:
+            cleared, inserted = _import_one_student(
+                conn,
+                entry,
+                parsed_rows,
+                parseable_dates_by_sis.get(entry.sis_number, 0),
+                upload_id,
+            )
+            conn.commit()
+            result.records_cleared += cleared
+            result.records_upserted += inserted
+            result.students_touched += 1
+        except Exception as exc:  # noqa: BLE001 — isolate per student
+            conn.rollback()
+            result.rejections.append(
+                StudentImportRejection(
+                    reason=str(exc),
+                    name=entry.name,
+                    sis_number=entry.sis_number,
+                )
+            )
 
-    result.students_touched = len(roster)
-    result.rows_skipped = rows_skipped
-
-    conn.commit()
+    result.students_rejected = len(result.rejections)
     return result

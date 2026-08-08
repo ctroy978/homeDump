@@ -49,27 +49,38 @@ def is_allowable_code(
 
 def check_eligibility(
     conn: sqlite3.Connection,
-    student_name: str,
+    student_id: int,
     period: int,
     absence_date: str,
 ) -> EligibilityResult:
     """
     Check whether a student had an allowable absence on a given date and period.
 
-    Requires an exact match on student name, period (0-7), and absence date
-    (YYYY-MM-DD).
+    Identity is by student_id (SIS-backed person), not display name.
     """
-    name = student_name.strip()
     date = absence_date.strip()
 
+    student = conn.execute(
+        "SELECT name FROM students WHERE id = ?",
+        (student_id,),
+    ).fetchone()
+    if student is None:
+        return EligibilityResult(
+            eligible=False,
+            student_name="",
+            period=period,
+            absence_date=date,
+            reason="Student not found.",
+        )
+
+    name = str(student["name"])
     row = conn.execute(
         """
-        SELECT ar.absence_code
-        FROM attendance_records ar
-        JOIN students s ON s.id = ar.student_id
-        WHERE s.name = ? AND ar.period = ? AND ar.absence_date = ?
+        SELECT absence_code
+        FROM attendance_records
+        WHERE student_id = ? AND period = ? AND absence_date = ?
         """,
-        (name, period, date),
+        (student_id, period, date),
     ).fetchone()
 
     if row is None:

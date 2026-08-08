@@ -33,9 +33,26 @@ class AssignmentOption:
     period: int
 
 
-def normalize_sis_number(sis_number: str) -> str:
-    """Normalize user-entered SIS numbers before lookup."""
-    return sis_number.strip()
+def normalize_sis_number(sis_number: object) -> str | None:
+    """
+    Normalize a SIS / student ID for storage and lookup.
+
+    - Trims whitespace
+    - Returns None when blank after trim
+    - Rejects values containing a decimal point (e.g. mangled Excel floats)
+    - Does not enforce a fixed length; leading zeros are preserved
+    """
+    if sis_number is None:
+        return None
+    text = str(sis_number).strip()
+    if not text:
+        return None
+    if "." in text:
+        raise ValueError(
+            "Student ID must not contain a decimal point. "
+            "Check the SIS number in the attendance export."
+        )
+    return text
 
 
 def get_student_by_sis(
@@ -43,7 +60,10 @@ def get_student_by_sis(
     sis_number: str,
 ) -> StudentRecord | None:
     """Return the student row for a SIS number, if one exists."""
-    normalized = normalize_sis_number(sis_number)
+    try:
+        normalized = normalize_sis_number(sis_number)
+    except ValueError:
+        return None
     if not normalized:
         return None
 
@@ -126,7 +146,6 @@ def list_eligible_assignments_for_student(
     conn: sqlite3.Connection,
     period: int,
     student_id: int,
-    student_name: str,
     absence_date: str,
 ) -> list[AssignmentOption]:
     """Assignments the student can claim for the selected period and date."""
@@ -145,7 +164,7 @@ def list_eligible_assignments_for_student(
 
     options: list[AssignmentOption] = []
     for row in rows:
-        result = check_eligibility(conn, student_name, period, date)
+        result = check_eligibility(conn, student_id, period, date)
         if not result.eligible:
             continue
         options.append(
@@ -175,7 +194,6 @@ def list_eligible_assignments_by_sis(
         conn,
         period,
         student.id,
-        student.name,
         absence_date,
     )
     return student, options

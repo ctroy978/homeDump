@@ -51,13 +51,18 @@ students). Default in `.env.example` is `changeme` — change it before go-live.
 ## Attendance import model
 
 Exports are year-to-date, but you download them **one class at a time**. Imports
-are **per student**, not per class:
+are **per student**, not per class. **Student ID (SIS number) is the only identity**
+— display names may be shared by two students.
 
-1. The app finds every student in the file (by **SIS number** when the export
-   includes it, otherwise by name).
-2. For each student, it **deletes all of their attendance** and reloads
-   year-to-date rows from that file.
-3. Students who are not in the file are left unchanged.
+1. The file **must** include a **Sis Number** column (plus Student Name, Date, and
+   Period 0–7).
+2. The app finds every student in the file **by SIS number**.
+3. For each student with a valid SIS, it **deletes all of their attendance** and
+   reloads year-to-date rows from that file, then **commits that student** before
+   moving on. One bad student does not block the rest of the class.
+4. Students **without a SIS** are **rejected** and listed on the upload result page
+   (with their name when available) so you can fix the ID and re-upload.
+5. Students who are not in the file are left unchanged.
 
 This lets you upload Period 3, then Period 5, without wiping other classes.
 Re-upload whenever late excused notes arrive.

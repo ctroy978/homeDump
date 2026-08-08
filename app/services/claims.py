@@ -249,7 +249,7 @@ def process_claim(
         )
         raise ClaimError("Assignment date does not match the selected absence date.")
 
-    eligibility = check_eligibility(conn, name, period, date)
+    eligibility = check_eligibility(conn, student.id, period, date)
     if not eligibility.eligible:
         log_claim(
             conn,

@@ -144,7 +144,7 @@ def test_list_eligible_assignments_not_eligible(
     assert student is not None
     assert (
         list_eligible_assignments_for_student(
-            db_conn, 3, student.id, student.name, "2025-09-02"
+            db_conn, 3, student.id, "2025-09-02"
         )
         == []
     )
