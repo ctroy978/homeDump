@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Why can't this student get makeup work?</h2>
+  <p>
+    Students only see a generic message. Use this page when you are standing
+    next to them to see the real reason.
+  </p>
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+
+  <form class="upload-form" action="/admin/eligibility" method="get">
+    <label for="sis_number">Student ID</label>
+    <input
+      id="sis_number"
+      name="sis_number"
+      type="text"
+      autocomplete="off"
+      required
+      value="{{ form.sis_number }}"
+    >
+
+    <label for="period">Class period</label>
+    <select id="period" name="period" required>
+      <option value="" {% if not form.period %}selected{% endif %} disabled>
+        Choose period…
+      </option>
+      {% for p in periods %}
+      <option value="{{ p }}" {% if form.period == p|string %}selected{% endif %}>
+        Period {{ p }}
+      </option>
+      {% endfor %}
+    </select>
+
+    <label for="date">Absence date (optional)</label>
+    <input id="date" name="date" type="date" value="{{ form.date }}">
+    <button type="submit">Check</button>
+  </form>
+</section>
+
+{% if diagnosis %}
+<section class="card">
+  <h2>Result</h2>
+  <p class="status-note {% if diagnosis.assignments or diagnosis.eligible_dates %}success{% else %}error{% endif %}">
+    {{ diagnosis.summary }}
+  </p>
+  {% if diagnosis.student %}
+  <p>
+    <strong>{{ diagnosis.student.name }}</strong>
+    — SIS {{ diagnosis.student.sis_number }}
+  </p>
+  {% endif %}
+
+  {% if diagnosis.eligible_dates %}
+  <h3>Eligible dates</h3>
+  <ul>
+    {% for day in diagnosis.eligible_dates %}
+    <li>{{ day }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if diagnosis.blocked_dates %}
+  <h3>Dates that do not qualify</h3>
+  <ul>
+    {% for day, reason in diagnosis.blocked_dates %}
+    <li>{{ day }} — {{ reason }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if diagnosis.assignments %}
+  <h3>Homework they can request</h3>
+  <ul>
+    {% for item in diagnosis.assignments %}
+    <li>{{ item.title }} (period {{ item.period }}, {{ item.assigned_date }})</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

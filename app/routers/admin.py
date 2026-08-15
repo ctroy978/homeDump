@@ -54,6 +54,7 @@ from app.services.print_queue import (
     print_batch_and_clear,
     remove_queue_item,
 )
+from app.services.student_lookup import diagnose_claim
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 templates = Jinja2Templates(directory=str(settings.project_root / "templates"))
@@ -274,6 +275,51 @@ def download_backup(
     )
 
 
+@router.get("/eligibility", response_class=HTMLResponse)
+def eligibility_lookup_page(
+    request: Request,
+    sis_number: str = "",
+    period: str = "",
+    date: str = "",
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> HTMLResponse:
+    """Teacher diagnostic: why a student ID can or cannot claim makeup work."""
+    diagnosis = None
+    error = None
+    period_value: int | None = None
+    if sis_number.strip() or period.strip() or date.strip():
+        try:
+            period_value = int(period)
+            if not 0 <= period_value <= 7:
+                raise ValueError("Period must be between 0 and 7.")
+        except ValueError:
+            error = "Choose a class period (0–7)."
+        else:
+            diagnosis = diagnose_claim(
+                db,
+                sis_number,
+                period_value,
+                date.strip() or None,
+            )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/eligibility.html",
+        context={
+            "title": "Student lookup",
+            "form": {
+                "sis_number": sis_number,
+                "period": period if period_value is None else str(period_value),
+                "date": date.strip(),
+            },
+            "diagnosis": diagnosis,
+            "error": error,
+            "periods": list(range(8)),
+        },
+    )
+
+
 @router.get("/attendance", response_class=HTMLResponse)
 def attendance_upload_page(
     request: Request,
@@ -376,19 +422,24 @@ def print_queue_batch(
     _admin: None = Depends(require_admin),
     db=Depends(get_db),
 ):
-    """Merge queued PDFs into one file for printing, then empty the queue."""
+    """Merge printable PDFs; skip missing/corrupt files so the rest still print."""
     try:
-        batch_path, filename, printed_count = print_batch_and_clear(db)
-    except PrintQueueError:
+        result = print_batch_and_clear(db)
+    except PrintQueueError as exc:
+        if exc.skipped:
+            return RedirectResponse(
+                url="/admin/print-queue?error=skipped",
+                status_code=303,
+            )
         return RedirectResponse(url="/admin/print-queue?error=empty", status_code=303)
     except OSError:
         return RedirectResponse(url="/admin/print-queue?error=failed", status_code=303)
 
     return FileResponse(
-        path=batch_path,
-        filename=filename,
+        path=result.batch_path,
+        filename=result.filename,
         media_type="application/pdf",
-        background=BackgroundTask(_remove_temp_file, batch_path),
+        background=BackgroundTask(_remove_temp_file, result.batch_path),
     )
 
 

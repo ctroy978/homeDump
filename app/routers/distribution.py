@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from html import escape
 from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Form, Query, Request
@@ -98,17 +99,23 @@ def distribute_prep_page(
             status_code=303,
         )
 
-    repos = list_filtered_repos()
-    selected_repo = repo or (repos[0].name if repos else "")
-    browse = (
-        browse_pdf_worksheets(selected_repo)
-        if selected_repo
-        else None
-    )
-    error_code = request.query_params.get("error")
+    repos = []
+    selected_repo = ""
+    browse = None
     error_message = None
+    try:
+        repos = list_filtered_repos()
+        selected_repo = repo or (repos[0].name if repos else "")
+        if selected_repo:
+            browse = browse_pdf_worksheets(selected_repo)
+    except (GitHubWorksheetError, ValueError) as exc:
+        error_message = str(exc)
+
+    error_code = request.query_params.get("error")
     if error_code == "packet":
-        error_message = request.query_params.get("message", "Could not build print packet.")
+        error_message = request.query_params.get(
+            "message", "Could not build print packet."
+        )
 
     return templates.TemplateResponse(
         request=request,
@@ -145,9 +152,9 @@ def distribute_prep_browse(
 
     try:
         browse = browse_pdf_worksheets(repo, path=path, query=q)
-    except ValueError as exc:
+    except (GitHubWorksheetError, ValueError) as exc:
         return HTMLResponse(
-            f"<p class='status-note error'>{exc}</p>",
+            f"<p class='status-note error'>{escape(str(exc))}</p>",
             status_code=400,
         )
     return templates.TemplateResponse(

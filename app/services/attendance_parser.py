@@ -12,7 +12,11 @@ from pathlib import Path
 
 import pandas as pd
 
-EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xls"}
+from app.services.eligibility import summarize_absence_codes
+from app.services.sis import find_student_row_by_sis, normalize_sis_number
+
+EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
+LEGACY_EXCEL_EXTENSIONS = {".xls"}
 TEXT_EXTENSIONS = {".txt", ".tsv", ".csv"}
 SUPPORTED_EXTENSIONS = EXCEL_EXTENSIONS | TEXT_EXTENSIONS
 
@@ -27,12 +31,21 @@ MISSING_SIS_MESSAGE = (
     "Missing student ID (SIS number). Add their SIS in the attendance export "
     "and re-upload this class."
 )
-INVALID_SIS_DECIMAL_MESSAGE = (
-    "Student ID must not contain a decimal point. Check the SIS number in the export."
+MISSING_NAME_MESSAGE = (
+    "Missing student name. Add their name in the attendance export "
+    "and re-upload this class."
 )
 NO_USABLE_ROWS_MESSAGE = (
     "No usable attendance rows for this student (check dates in the export). "
     "Existing records were left unchanged."
+)
+HEADER_MISSING_MESSAGE = (
+    "Could not find attendance header row. The file must include "
+    "columns named 'Student Name', 'Date', and at least one 'Period 0'–'Period 7'."
+)
+LEGACY_XLS_MESSAGE = (
+    "Excel .xls files are not supported. Upload the .txt export from your "
+    "attendance system, or save the workbook as .xlsx."
 )
 
 
@@ -77,6 +90,16 @@ class AttendanceParseResult:
     rows_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
     rejections: list[StudentImportRejection] = field(default_factory=list)
+    qualifying_codes: list[str] = field(default_factory=list)
+    unrecognized_codes: list[str] = field(default_factory=list)
+
+    @property
+    def outcome(self) -> str:
+        if self.students_touched and not self.students_rejected:
+            return "success"
+        if self.students_touched:
+            return "partial"
+        return "failed"
 
 
 def parse_excel_date(value: object) -> str | None:
@@ -127,10 +150,6 @@ def _parse_sis_cell(value: object) -> tuple[str | None, str | None]:
 
     Returns ``(sis_number, error_message)``. When the cell is blank,
     both are None. When invalid, sis is None and error_message is set.
-
-    Whole-number floats (common when pandas infers a numeric column) become
-    integer strings without a decimal. String values that already contain '.'
-    are rejected.
     """
     if value is None:
         return None, None
@@ -140,26 +159,25 @@ def _parse_sis_cell(value: object) -> tuple[str | None, str | None]:
     except (TypeError, ValueError):
         pass
 
-    if isinstance(value, bool):
-        return str(value).strip() or None, None
-    if isinstance(value, int):
-        return str(value), None
-    if isinstance(value, float):
-        if value.is_integer():
-            return str(int(value)), None
-        return None, INVALID_SIS_DECIMAL_MESSAGE
-
-    text = str(value).strip()
-    if not text:
-        return None, None
-    if "." in text:
-        return None, INVALID_SIS_DECIMAL_MESSAGE
-    return text, None
+    try:
+        sis = normalize_sis_number(value)
+    except ValueError as exc:
+        return None, str(exc)
+    return sis, None
 
 
 def _normalize_column_label(value: object) -> str:
     """Strip whitespace and surrounding quotes from export column labels."""
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
     text = str(value).strip()
+    if text.lower() in {"nan", "none", "<na>", "nat"}:
+        return ""
     if len(text) >= 2 and text[0] == text[-1] == '"':
         text = text[1:-1].strip()
     return text
@@ -269,26 +287,57 @@ def _load_text_export(path: Path) -> pd.DataFrame:
     delimiter = _detect_delimiter(text, path.suffix.lower())
     header_row = find_header_row_index(text, delimiter)
     if header_row is None:
-        raise ValueError(
-            "Could not find attendance header row. The file must include "
-            "columns named 'Student Name', 'Date', and at least one 'Period 0'–'Period 7'."
-        )
+        raise ValueError(HEADER_MISSING_MESSAGE)
 
     # Keep blank preamble lines so the detected header index matches pandas.
+    # Read every column as text so SIS values keep leading zeros and one
+    # blank ID cell cannot coerce the rest of the class to floats.
     df = pd.read_csv(
         StringIO(text),
         sep=delimiter,
         header=header_row,
         skip_blank_lines=False,
+        dtype=str,
+        keep_default_na=False,
     )
     return df
+
+
+def find_excel_header_row_index(df: pd.DataFrame) -> int | None:
+    """Return the row index of the attendance header in an Excel sheet."""
+    for index, row in df.iterrows():
+        fields = [_normalize_column_label(value) for value in row.tolist()]
+        if _is_attendance_header(fields):
+            return int(index)
+    return None
+
+
+def _load_excel_export(path: Path) -> pd.DataFrame:
+    """Read an Excel attendance export, skipping school-name preamble rows."""
+    try:
+        raw = pd.read_excel(path, sheet_name=0, header=None, dtype=str)
+    except ImportError as exc:
+        raise ValueError(
+            "Could not read this Excel file. Upload the .txt export or save as .xlsx."
+        ) from exc
+
+    header_row = find_excel_header_row_index(raw)
+    if header_row is None:
+        raise ValueError(HEADER_MISSING_MESSAGE)
+
+    columns = [_normalize_column_label(value) for value in raw.iloc[header_row].tolist()]
+    data = raw.iloc[header_row + 1 :].copy()
+    data.columns = columns
+    return data.reset_index(drop=True)
 
 
 def load_attendance_dataframe(path: Path) -> pd.DataFrame:
     """Read an attendance export from Excel or plain text."""
     suffix = path.suffix.lower()
+    if suffix in LEGACY_EXCEL_EXTENSIONS:
+        raise ValueError(LEGACY_XLS_MESSAGE)
     if suffix in EXCEL_EXTENSIONS:
-        df = pd.read_excel(path, sheet_name=0)
+        df = _load_excel_export(path)
     elif suffix in TEXT_EXTENSIONS:
         df = _load_text_export(path)
     else:
@@ -340,9 +389,11 @@ def parse_attendance_rows(
     parseable_dates_by_sis: dict[str, int] = {}
     roster: dict[str, StudentRosterEntry] = {}
     rejections: list[StudentImportRejection] = []
-    rejected_missing_names: set[str] = set()
+    rejected_missing_sis: set[str] = set()
     rejected_invalid_sis: set[str] = set()
+    rejected_missing_name: set[str] = set()
 
+    prepared_rows: list[dict[str, object]] = []
     for _, row in df.iterrows():
         student_name = _normalize_code(row.get(name_col))
         absence_date = parse_excel_date(row.get(date_col))
@@ -365,8 +416,8 @@ def parse_attendance_rows(
             continue
 
         if not sis_number:
-            if student_name and student_name not in rejected_missing_names:
-                rejected_missing_names.add(student_name)
+            if student_name and student_name not in rejected_missing_sis:
+                rejected_missing_sis.add(student_name)
                 rejections.append(
                     StudentImportRejection(
                         reason=MISSING_SIS_MESSAGE,
@@ -376,13 +427,18 @@ def parse_attendance_rows(
             rows_skipped += 1
             continue
 
+        prepared_rows.append(
+            {
+                "student_name": student_name,
+                "sis_number": sis_number,
+                "grade": grade,
+                "note": note,
+                "absence_date": absence_date,
+                "source_row": row,
+            }
+        )
         if not student_name:
-            rows_skipped += 1
             continue
-
-        # Last write wins for name; keep prior grade when this row omits it.
-        # Include the student even when the date is unparseable so we can refuse
-        # to wipe existing attendance with an empty refresh.
         existing = roster.get(sis_number)
         roster[sis_number] = StudentRosterEntry(
             key=sis_number,
@@ -391,6 +447,27 @@ def parse_attendance_rows(
             sis_number=sis_number,
         )
 
+    for prepared in prepared_rows:
+        sis_number = str(prepared["sis_number"])
+        student_name = prepared["student_name"]
+        if not student_name:
+            entry = roster.get(sis_number)
+            if entry is None:
+                if sis_number not in rejected_missing_name:
+                    rejected_missing_name.add(sis_number)
+                    rejections.append(
+                        StudentImportRejection(
+                            reason=MISSING_NAME_MESSAGE,
+                            sis_number=sis_number,
+                        )
+                    )
+                rows_skipped += 1
+                continue
+            student_name = entry.name
+
+        entry = roster[sis_number]
+        grade = prepared["grade"] or entry.grade
+        absence_date = prepared["absence_date"]
         if not absence_date:
             rows_skipped += 1
             continue
@@ -398,8 +475,9 @@ def parse_attendance_rows(
         parseable_dates_by_sis[sis_number] = parseable_dates_by_sis.get(sis_number, 0) + 1
 
         row_had_code = False
+        source_row = prepared["source_row"]
         for column, period in period_columns.items():
-            code = _normalize_code(row.get(column))
+            code = _normalize_code(source_row.get(column))
             if not code:
                 continue
             row_had_code = True
@@ -412,7 +490,7 @@ def parse_attendance_rows(
                     "absence_date": absence_date,
                     "period": period,
                     "absence_code": code,
-                    "note": note,
+                    "note": prepared["note"],
                 }
             )
 
@@ -449,26 +527,21 @@ def upsert_student(
     sis_number: str,
 ) -> int:
     """Insert or update a student by SIS number and return its id."""
-    if not sis_number or not str(sis_number).strip():
+    sis = normalize_sis_number(sis_number)
+    if not sis:
         raise ValueError("sis_number is required")
-    sis = str(sis_number).strip()
-    if "." in sis:
-        raise ValueError(INVALID_SIS_DECIMAL_MESSAGE)
 
-    by_sis = conn.execute(
-        "SELECT id FROM students WHERE sis_number = ?",
-        (sis,),
-    ).fetchone()
-    if by_sis is not None:
+    existing = find_student_row_by_sis(conn, sis)
+    if existing is not None:
         conn.execute(
             """
             UPDATE students
             SET name = ?, grade = COALESCE(?, grade)
             WHERE id = ?
             """,
-            (name, grade, by_sis["id"]),
+            (name, grade, existing["id"]),
         )
-        return int(by_sis["id"])
+        return int(existing["id"])
 
     conn.execute(
         "INSERT INTO students (sis_number, name, grade) VALUES (?, ?, ?)",
@@ -575,10 +648,7 @@ def _import_one_student(
     Raises ValueError when the refresh would wipe existing data with no usable
     rows (unparseable dates only).
     """
-    existing = conn.execute(
-        "SELECT id FROM students WHERE sis_number = ?",
-        (entry.sis_number,),
-    ).fetchone()
+    existing = find_student_row_by_sis(conn, entry.sis_number)
     prior_count = (
         _existing_attendance_count(conn, int(existing["id"])) if existing else 0
     )
@@ -665,4 +735,7 @@ def ingest_attendance_file(
             )
 
     result.students_rejected = len(result.rejections)
+    result.qualifying_codes, result.unrecognized_codes = summarize_absence_codes(
+        [str(row["absence_code"]) for row in parsed_rows]
+    )
     return result

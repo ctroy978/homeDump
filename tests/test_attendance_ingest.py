@@ -9,7 +9,11 @@ import pandas as pd
 
 from app.database import init_schema
 from app.services.attendance_parser import (
+    HEADER_MISSING_MESSAGE,
+    LEGACY_XLS_MESSAGE,
+    MISSING_NAME_MESSAGE,
     MISSING_SIS_MESSAGE,
+    find_excel_header_row_index,
     find_header_row_index,
     ingest_attendance_file,
     load_attendance_dataframe,
@@ -334,6 +338,94 @@ def test_quoted_column_headers_from_live_export(tmp_path: Path) -> None:
     assert _record_code(conn, "Jane Doe", "2025-09-02", 3) == "Illness"
 
 
+def _period_headers() -> list[str]:
+    return [f"Period {i}" for i in range(8)]
+
+
+def test_excel_export_with_preamble_parses_correctly(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "period3_with_preamble.xlsx"
+    header = ["Student Name", "Sis Number", "Grade", "Date", *_period_headers(), "Note"]
+    data_row = [
+        "Alice Example",
+        "1001",
+        "10",
+        "2025-09-02",
+        "",
+        "",
+        "",
+        "Illness",
+        "",
+        "",
+        "",
+        "",
+        "",
+    ]
+    raw = pd.DataFrame(
+        [
+            ["Jefferson High School"] + [""] * (len(header) - 1),
+            ["Attendance Detail - Year to Date"] + [""] * (len(header) - 1),
+            [""] * len(header),
+            header,
+            data_row,
+        ]
+    )
+    raw.to_excel(export, index=False, header=False)
+
+    result = ingest_attendance_file(conn, export, export.name)
+
+    assert result.students_touched == 1
+    assert result.records_upserted == 1
+    assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Illness"
+
+
+def test_excel_plain_header_still_parses(tmp_path: Path) -> None:
+    export = tmp_path / "plain.xlsx"
+    _write_fixture(
+        export.with_suffix(".txt"),
+        [_base_row(name="Alice Example", sis="1001", period3="Illness")],
+    )
+    pd.DataFrame([_base_row(name="Alice Example", sis="1001", period3="Illness")]).to_excel(
+        export, index=False
+    )
+
+    df = load_attendance_dataframe(export)
+    assert "Student Name" in list(df.columns)
+    assert "Sis Number" in list(df.columns)
+    assert find_excel_header_row_index(
+        pd.read_excel(export, header=None, dtype=str)
+    ) == 0
+
+
+def test_excel_missing_header_row_raises_clear_error(tmp_path: Path) -> None:
+    export = tmp_path / "no_header.xlsx"
+    pd.DataFrame(
+        [
+            ["School Attendance Report"],
+            ["Generated: 2025-09-15"],
+            ["Alice Example", "10", "2025-09-02", "Illness"],
+        ]
+    ).to_excel(export, index=False, header=False)
+
+    try:
+        load_attendance_dataframe(export)
+    except ValueError as exc:
+        assert HEADER_MISSING_MESSAGE in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for missing header row")
+
+
+def test_legacy_xls_is_rejected_with_clear_message(tmp_path: Path) -> None:
+    export = tmp_path / "old.xls"
+    export.write_bytes(b"not a real xls")
+    try:
+        load_attendance_dataframe(export)
+    except ValueError as exc:
+        assert LEGACY_XLS_MESSAGE in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for .xls")
+
+
 def test_missing_header_row_raises_clear_error(tmp_path: Path) -> None:
     export = tmp_path / "no_header.txt"
     export.write_text(
@@ -378,6 +470,39 @@ def test_same_display_name_different_sis_both_import(tmp_path: Path) -> None:
     assert _count_by_sis(conn, "2") == 1
 
 
+def test_import_outcome_success_partial_failed(tmp_path: Path) -> None:
+    conn = _memory_db()
+    good = tmp_path / "all_good.txt"
+    _write_fixture(
+        good,
+        [_base_row(name="Carol Good", sis="3003", period3="Illness")],
+    )
+    success = ingest_attendance_file(conn, good, good.name)
+    assert success.outcome == "success"
+
+    mixed = tmp_path / "mixed.txt"
+    mixed.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Alex Rivera\t\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Carol Good\t3003\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+    partial = ingest_attendance_file(conn, mixed, mixed.name)
+    assert partial.outcome == "partial"
+
+    bad = tmp_path / "all_bad.txt"
+    bad.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Alex Rivera\t\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+    failed = ingest_attendance_file(conn, bad, bad.name)
+    assert failed.outcome == "failed"
+    assert failed.students_touched == 0
+
+
 def test_missing_sis_rejects_but_others_import(tmp_path: Path) -> None:
     conn = _memory_db()
     export = tmp_path / "partial.txt"
@@ -406,6 +531,52 @@ def test_missing_sis_rejects_but_others_import(tmp_path: Path) -> None:
         ).fetchone()["c"]
         == 0
     )
+
+
+def test_missing_name_with_sis_is_rejected_not_silent(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "no_name.txt"
+    export.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "\t5555\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Carol Good\t3003\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 1
+    assert result.students_rejected == 1
+    assert _count_records(conn, "Carol Good") == 1
+    assert any(
+        r.sis_number == "5555" and MISSING_NAME_MESSAGE in r.reason
+        for r in result.rejections
+    )
+    assert (
+        conn.execute(
+            "SELECT COUNT(*) AS c FROM students WHERE sis_number = '5555'"
+        ).fetchone()["c"]
+        == 0
+    )
+
+
+def test_blank_name_row_uses_name_from_other_row_same_sis(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "mixed_name.txt"
+    export.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "\t1001\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Alice Example\t1001\t10\t2025-09-03\t\t\t\tExcused Absence\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 1
+    assert result.students_rejected == 0
+    assert _count_records(conn, "Alice Example") == 2
+    assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Illness"
+    assert _record_code(conn, "Alice Example", "2025-09-03", 3) == "Excused Absence"
 
 
 def test_duplicate_sis_in_file_last_write_wins(tmp_path: Path) -> None:
@@ -490,10 +661,12 @@ def test_parse_sis_cell_whole_number_float_and_string_decimal() -> None:
     assert _parse_sis_cell(12345.0) == ("12345", None)
     assert _parse_sis_cell(12345) == ("12345", None)
     assert _parse_sis_cell(" 10001 ") == ("10001", None)
-    sis, err = _parse_sis_cell("12345.0")
-    assert sis is None and err is not None and "decimal" in err.lower()
+    assert _parse_sis_cell("12345.0") == ("12345", None)
+    assert _parse_sis_cell("001234") == ("001234", None)
     sis, err = _parse_sis_cell(12.5)
     assert sis is None and err is not None
+    sis, err = _parse_sis_cell("12.34")
+    assert sis is None and err is not None and "decimal" in err.lower()
 
 
 def test_require_sis_number_column(tmp_path: Path) -> None:
@@ -524,6 +697,151 @@ def test_require_sis_number_column(tmp_path: Path) -> None:
         assert "Sis Number" in str(exc)
     else:
         raise AssertionError("Expected missing Sis Number column to fail")
+
+
+def test_leading_zeros_preserved_when_sis_is_text(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "padded.txt"
+    export.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Padded\t001234\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Neighbor\t001235\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 2
+    stored = [
+        row["sis_number"]
+        for row in conn.execute(
+            "SELECT sis_number FROM students ORDER BY sis_number"
+        ).fetchall()
+    ]
+    assert stored == ["001234", "001235"]
+
+
+def test_blank_sis_does_not_strip_neighbors_leading_zeros(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "mixed.txt"
+    export.write_text(
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Missing\t\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+        "Padded\t001234\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
+        encoding="utf-8",
+    )
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 1
+    assert result.students_rejected == 1
+    row = conn.execute("SELECT sis_number FROM students").fetchone()
+    assert row["sis_number"] == "001234"
+
+
+def test_excel_float_sis_does_not_create_duplicate_student(tmp_path: Path) -> None:
+    conn = _memory_db()
+    upsert_student(conn, "Alice Example", "10", "001001")
+    conn.commit()
+
+    export = tmp_path / "numeric.xlsx"
+    pd.DataFrame(
+        [
+            {
+                "Student Name": "Alice Example",
+                "Sis Number": 1001,
+                "Grade": 10,
+                "Date": "2025-09-02",
+                "Period 0": "",
+                "Period 1": "",
+                "Period 2": "",
+                "Period 3": "Excused Absence",
+                "Period 4": "",
+                "Period 5": "",
+                "Period 6": "",
+                "Period 7": "",
+                "Note": "",
+            }
+        ]
+    ).to_excel(export, index=False)
+
+    result = ingest_attendance_file(conn, export, export.name)
+    assert result.students_touched == 1
+    assert result.students_rejected == 0
+    rows = conn.execute("SELECT id, sis_number, name FROM students").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["sis_number"] == "001001"
+    assert _count_by_sis(conn, "001001") == 1
+
+
+def test_garbage_dates_respect_leading_zero_equivalent(tmp_path: Path) -> None:
+    conn = _memory_db()
+    first = tmp_path / "padded.txt"
+    export_text = (
+        "Student Name\tSis Number\tGrade\tDate\tPeriod 0\tPeriod 1\tPeriod 2\t"
+        "Period 3\tPeriod 4\tPeriod 5\tPeriod 6\tPeriod 7\tNote\n"
+        "Dave\t001001\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
+    )
+    first.write_text(export_text, encoding="utf-8")
+    ingest_attendance_file(conn, first, first.name)
+    assert _count_by_sis(conn, "001001") == 1
+
+    bad = tmp_path / "bad.xlsx"
+    pd.DataFrame(
+        [
+            {
+                "Student Name": "Dave",
+                "Sis Number": 1001,
+                "Grade": 10,
+                "Date": "???",
+                "Period 0": "",
+                "Period 1": "",
+                "Period 2": "",
+                "Period 3": "Illness",
+                "Period 4": "",
+                "Period 5": "",
+                "Period 6": "",
+                "Period 7": "",
+                "Note": "",
+            }
+        ]
+    ).to_excel(bad, index=False)
+
+    result = ingest_attendance_file(conn, bad, bad.name)
+    assert _count_by_sis(conn, "001001") == 1
+    assert any("No usable attendance" in r.reason for r in result.rejections)
+
+
+def test_upsert_reuses_leading_zero_equivalent_instead_of_splitting() -> None:
+    conn = _memory_db()
+    first = upsert_student(conn, "Alice", "10", "001001")
+    second = upsert_student(conn, "Alice Updated", "11", "1001")
+    conn.commit()
+    assert first == second
+    row = conn.execute("SELECT name, sis_number, grade FROM students").fetchone()
+    assert row["sis_number"] == "001001"
+    assert row["name"] == "Alice Updated"
+    assert row["grade"] == "11"
+
+
+def test_upload_result_lists_qualifying_and_unrecognized_codes(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "codes.txt"
+    _write_fixture(
+        export,
+        [
+            _base_row(name="Alice", sis="1001", period3="illness"),
+            _base_row(
+                name="Bob",
+                sis="2002",
+                date="2025-09-03",
+                period3="Unexcused Absence",
+            ),
+        ],
+    )
+    result = ingest_attendance_file(conn, export, export.name)
+    assert "illness" in result.qualifying_codes or "Illness" in result.qualifying_codes
+    assert any("Unexcused" in code for code in result.unrecognized_codes)
 
 
 def test_names_may_collide_in_schema() -> None:

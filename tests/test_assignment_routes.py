@@ -113,6 +113,8 @@ def test_add_assignment_page_offers_upload_and_github(
     response = admin_client.get("/admin/assignments/new")
 
     assert response.status_code == 200
+    assert 'src="/static/htmx.min.js"' in response.text
+    assert "unpkg.com/htmx" not in response.text
     assert "Upload from this computer" in response.text
     assert "Choose from GitHub" in response.text
     assert REPO in response.text

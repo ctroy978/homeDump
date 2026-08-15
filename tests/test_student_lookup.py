@@ -13,6 +13,7 @@ import app.services.assignments as assignments_module
 from app.services.assignments import create_assignment
 from app.services.student_lookup import (
     LOOKUP_FAILURE_MESSAGE,
+    diagnose_claim,
     get_student_by_sis,
     list_eligible_assignments_by_sis,
     list_eligible_assignments_for_student,
@@ -67,6 +68,13 @@ def test_get_student_by_sis(db_conn: sqlite3.Connection) -> None:
     assert student.name == "Test Student A"
     assert student.sis_number == "10001"
     assert get_student_by_sis(db_conn, "missing") is None
+    padded = get_student_by_sis(db_conn, "010001")
+    assert padded is not None
+    assert padded.id == student.id
+    dotted = get_student_by_sis(db_conn, "10001.0")
+    assert dotted is not None
+    assert dotted.id == student.id
+    assert get_student_by_sis(db_conn, "12.34") is None
 
 
 def test_list_eligible_dates_by_sis_filters_allowable_codes(
@@ -150,6 +158,62 @@ def test_list_eligible_assignments_not_eligible(
     )
 
 
+def test_diagnose_claim_unknown_sis(db_conn: sqlite3.Connection) -> None:
+    result = diagnose_claim(db_conn, "99999", 0)
+    assert result.student is None
+    assert "attendance database" in result.summary
+
+
+def test_diagnose_claim_unexcused_date(db_conn: sqlite3.Connection) -> None:
+    result = diagnose_claim(db_conn, "10001", 3, "2025-09-02")
+    assert result.student is not None
+    assert "not allowable" in result.summary
+    assert result.assignments == []
+
+
+def test_diagnose_claim_allowable_without_assignment(
+    db_conn: sqlite3.Connection,
+) -> None:
+    result = diagnose_claim(db_conn, "10001", 0, "2025-09-29")
+    assert result.student is not None
+    assert "no homework is assigned" in result.summary
+
+
+def test_diagnose_claim_eligible_with_assignment(
+    db_conn: sqlite3.Connection,
+) -> None:
+    _add_assignment(db_conn, periods=[0], assigned_date="2025-09-29", title="Week 1")
+    result = diagnose_claim(db_conn, "10001", 0, "2025-09-29")
+    assert "can claim" in result.summary
+    assert len(result.assignments) == 1
+    assert result.eligible_dates == ["2025-09-29"]
+
+
+def test_diagnose_claim_period_with_no_records(db_conn: sqlite3.Connection) -> None:
+    result = diagnose_claim(db_conn, "10001", 7)
+    assert "no attendance records" in result.summary
+
+
 def test_lookup_failure_message_is_generic() -> None:
     assert "student ID" in LOOKUP_FAILURE_MESSAGE
     assert "teacher" in LOOKUP_FAILURE_MESSAGE
+
+
+def test_leading_zero_lookup_is_not_used_when_two_digit_equivalents_exist(
+    db_conn: sqlite3.Connection,
+) -> None:
+    # Bypass upsert so we can seed a split that import itself will not create.
+    db_conn.execute(
+        "INSERT INTO students (sis_number, name, grade) VALUES ('010001', 'Other', '10')"
+    )
+    db_conn.commit()
+
+    exact = get_student_by_sis(db_conn, "10001")
+    assert exact is not None
+    assert exact.sis_number == "10001"
+
+    padded = get_student_by_sis(db_conn, "010001")
+    assert padded is not None
+    assert padded.sis_number == "010001"
+
+    assert get_student_by_sis(db_conn, "00010001") is None

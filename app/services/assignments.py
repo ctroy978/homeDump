@@ -325,6 +325,15 @@ def delete_assignment(conn: sqlite3.Connection, assignment_id: int) -> None:
     if row is None:
         raise ValueError("Assignment not found.")
 
+    conn.execute(
+        """
+        DELETE FROM print_queue
+        WHERE token IN (
+            SELECT token FROM claim_tokens WHERE assignment_id = ?
+        )
+        """,
+        (assignment_id,),
+    )
     conn.execute("DELETE FROM claim_tokens WHERE assignment_id = ?", (assignment_id,))
     conn.execute(
         "UPDATE claim_logs SET assignment_id = NULL WHERE assignment_id = ?",

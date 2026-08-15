@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 
+import fitz
 from pypdf import PdfReader, PdfWriter
 
 from app.services.claims import claim_pdf_path
@@ -15,6 +17,10 @@ from app.services.claims import claim_pdf_path
 
 class PrintQueueError(Exception):
     """Raised when a print queue operation cannot complete."""
+
+    def __init__(self, message: str, *, skipped: list[PrintSkip] | None = None) -> None:
+        super().__init__(message)
+        self.skipped = list(skipped or [])
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,28 @@ class PrintQueueEntry:
     period: int
     absence_date: str
     queued_at: str
+
+
+@dataclass(frozen=True)
+class PrintSkip:
+    """A queued request that could not be included in the printed batch."""
+
+    student_name: str
+    assignment_title: str
+    reason: str
+
+    def display(self) -> str:
+        return f"{self.student_name} ({self.assignment_title}) — {self.reason}"
+
+
+@dataclass(frozen=True)
+class PrintBatchResult:
+    """Outcome of merging the print queue."""
+
+    batch_path: Path
+    filename: str
+    printed_count: int
+    skipped: list[PrintSkip] = field(default_factory=list)
 
 
 def is_already_printed(conn: sqlite3.Connection, token: str) -> bool:
@@ -116,32 +144,96 @@ def _batch_filename() -> str:
     return f"makeup-homework-batch-{datetime.now().strftime('%Y%m%d-%H%M%S')}.pdf"
 
 
-def build_batch_pdf(conn: sqlite3.Connection) -> tuple[Path, int]:
-    """
-    Merge all queued watermarked PDFs into one file for printing.
+def _skipped_cover_pdf(skipped: list[PrintSkip]) -> bytes:
+    """Build a first page listing requests that were left in the queue."""
+    lines = [
+        "Some requests were not included in this batch:",
+        "",
+    ]
+    for item in skipped:
+        lines.append(f"- {item.display()}")
+    lines.extend(["", "Those requests are still in the print queue."])
 
-    Returns the temp file path and number of documents merged.
+    document = fitz.open()
+    try:
+        page = document.new_page(width=612, height=792)
+        page.insert_text(
+            (72, 72),
+            "\n".join(lines),
+            fontsize=12,
+            fontname="helv",
+        )
+        return document.tobytes()
+    finally:
+        document.close()
+
+
+def _append_claim_pdf(
+    writer: PdfWriter,
+    entry: PrintQueueEntry,
+) -> PrintSkip | None:
+    pdf_path = claim_pdf_path(entry.token)
+    if not pdf_path.exists():
+        return PrintSkip(
+            student_name=entry.student_name,
+            assignment_title=entry.assignment_title,
+            reason="Missing PDF",
+        )
+    try:
+        reader = PdfReader(str(pdf_path))
+        if len(reader.pages) == 0:
+            return PrintSkip(
+                student_name=entry.student_name,
+                assignment_title=entry.assignment_title,
+                reason="PDF has no pages",
+            )
+        for page in reader.pages:
+            writer.add_page(page)
+    except Exception:  # noqa: BLE001 — isolate one bad file
+        return PrintSkip(
+            student_name=entry.student_name,
+            assignment_title=entry.assignment_title,
+            reason="Could not read PDF",
+        )
+    return None
+
+
+def build_batch_pdf(
+    conn: sqlite3.Connection,
+) -> tuple[Path, list[PrintQueueEntry], list[PrintSkip]]:
+    """
+    Merge readable queued PDFs into one file.
+
+    Unreadable or missing files are skipped so the rest of the class still prints.
     """
     entries = list_print_queue(conn)
     if not entries:
         raise PrintQueueError("The print queue is empty.")
 
     writer = PdfWriter()
-    merged_count = 0
+    printed: list[PrintQueueEntry] = []
+    skipped: list[PrintSkip] = []
 
     for entry in entries:
-        pdf_path = claim_pdf_path(entry.token)
-        if not pdf_path.exists():
-            raise PrintQueueError(
-                f"Missing PDF for {entry.student_name} ({entry.assignment_title})."
-            )
-        reader = PdfReader(str(pdf_path))
-        for page in reader.pages:
-            writer.add_page(page)
-        merged_count += 1
+        skip = _append_claim_pdf(writer, entry)
+        if skip is None:
+            printed.append(entry)
+        else:
+            skipped.append(skip)
 
-    if merged_count == 0:
-        raise PrintQueueError("The print queue is empty.")
+    if not printed:
+        raise PrintQueueError(
+            "None of the queued homework PDFs could be printed.",
+            skipped=skipped,
+        )
+
+    if skipped:
+        cover = PdfReader(BytesIO(_skipped_cover_pdf(skipped)))
+        merged = PdfWriter()
+        merged.add_page(cover.pages[0])
+        for page in writer.pages:
+            merged.add_page(page)
+        writer = merged
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     tmp_path = Path(tmp.name)
@@ -150,18 +242,17 @@ def build_batch_pdf(conn: sqlite3.Connection) -> tuple[Path, int]:
     with tmp_path.open("wb") as handle:
         writer.write(handle)
 
-    return tmp_path, merged_count
+    return tmp_path, printed, skipped
 
 
-def print_batch_and_clear(conn: sqlite3.Connection) -> tuple[Path, str, int]:
+def print_batch_and_clear(conn: sqlite3.Connection) -> PrintBatchResult:
     """
-    Build a merged PDF for the current queue and then empty the queue.
+    Build a merged PDF for printable queue items and remove only those items.
 
-    Returns temp file path, download filename, and merged document count.
+    Requests whose PDFs are missing or unreadable stay in the queue.
     """
-    entries = list_print_queue(conn)
-    batch_path, merged_count = build_batch_pdf(conn)
-    for entry in entries:
+    batch_path, printed, skipped = build_batch_pdf(conn)
+    for entry in printed:
         conn.execute(
             """
             UPDATE claim_tokens
@@ -170,6 +261,11 @@ def print_batch_and_clear(conn: sqlite3.Connection) -> tuple[Path, str, int]:
             """,
             (entry.token,),
         )
-    clear_print_queue(conn)
+        conn.execute("DELETE FROM print_queue WHERE token = ?", (entry.token,))
     conn.commit()
-    return batch_path, _batch_filename(), merged_count
+    return PrintBatchResult(
+        batch_path=batch_path,
+        filename=_batch_filename(),
+        printed_count=len(printed),
+        skipped=skipped,
+    )

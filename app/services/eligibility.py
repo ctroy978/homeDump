@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 
 from app.config import settings
+
+_WHITESPACE_RE = re.compile(r"\s+")
 
 
 @dataclass(frozen=True)
@@ -36,15 +39,47 @@ def normalize_text(value: str) -> str:
     return text.replace("\u2019", "'").replace("\u2018", "'")
 
 
+def normalize_absence_code(value: str) -> str:
+    """Case, spacing, and apostrophe fold used for allowable-code matching."""
+    text = normalize_text(value)
+    return _WHITESPACE_RE.sub(" ", text).casefold()
+
+
 def is_allowable_code(
     code: str,
     allowable_codes: tuple[str, ...] | None = None,
 ) -> bool:
     """Return True when an absence code is in the configured allowable list."""
     codes = allowable_codes if allowable_codes is not None else settings.allowable_codes
-    normalized_code = normalize_text(code)
-    allowable_normalized = {normalize_text(item) for item in codes}
+    normalized_code = normalize_absence_code(code)
+    allowable_normalized = {normalize_absence_code(item) for item in codes}
     return normalized_code in allowable_normalized
+
+
+def summarize_absence_codes(
+    codes: list[str],
+    allowable_codes: tuple[str, ...] | None = None,
+) -> tuple[list[str], list[str]]:
+    """
+    Return ``(qualifying, not_qualifying)`` display labels from imported codes.
+
+    First-seen spelling is kept for the teacher; matching is case/space
+    insensitive.
+    """
+    seen: dict[str, str] = {}
+    for raw in codes:
+        text = normalize_text(str(raw))
+        if not text:
+            continue
+        key = normalize_absence_code(text)
+        seen.setdefault(key, text)
+
+    labels = sorted(seen.values(), key=str.casefold)
+    qualifying = [label for label in labels if is_allowable_code(label, allowable_codes)]
+    not_qualifying = [
+        label for label in labels if not is_allowable_code(label, allowable_codes)
+    ]
+    return qualifying, not_qualifying
 
 
 def check_eligibility(

@@ -22,6 +22,12 @@
   {% if request.query_params.get('error') == 'empty' %}
   <p class="status-note error">The print queue is empty — nothing to print.</p>
   {% endif %}
+  {% if request.query_params.get('error') == 'skipped' %}
+  <p class="status-note error">
+    None of the queued homework PDFs could be printed. The requests are still
+    listed below — fix or remove them, then try again.
+  </p>
+  {% endif %}
   {% if request.query_params.get('error') == 'failed' %}
   <p class="status-note error">Batch print failed. Try again or clear the queue.</p>
   {% endif %}

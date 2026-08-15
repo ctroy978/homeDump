@@ -22,6 +22,7 @@
   </p>
 
   {% if import_result %}
+  {% if import_result.outcome == "success" %}
   <p class="status-note success">
     Upload complete —
     {{ import_result.records_upserted }} absence record(s) saved for
@@ -34,6 +35,27 @@
     Skipped {{ import_result.rows_skipped }} empty or incomplete row(s).
     {% endif %}
   </p>
+  {% elif import_result.outcome == "partial" %}
+  <p class="status-note">
+    Partial import —
+    {{ import_result.records_upserted }} absence record(s) saved for
+    {{ import_result.students_touched }} student(s).
+    {{ import_result.students_rejected }} student(s) were not imported.
+    {% if import_result.rows_skipped %}
+    Skipped {{ import_result.rows_skipped }} empty or incomplete row(s).
+    {% endif %}
+  </p>
+  {% else %}
+  <p class="status-note error">
+    Upload failed — no students were imported.
+    {% if import_result.students_rejected %}
+    {{ import_result.students_rejected }} student(s) need a fix in the export.
+    {% endif %}
+    {% if import_result.rows_skipped %}
+    Skipped {{ import_result.rows_skipped }} empty or incomplete row(s).
+    {% endif %}
+  </p>
+  {% endif %}
   {% if import_result.rejections %}
   <div class="status-note error">
     <p>
@@ -45,6 +67,27 @@
       <li>{{ item.display() }}</li>
       {% endfor %}
     </ul>
+  </div>
+  {% endif %}
+  {% if import_result.qualifying_codes or import_result.unrecognized_codes %}
+  <div class="status-note">
+    {% if import_result.qualifying_codes %}
+    <p>
+      <strong>Qualify for makeup:</strong>
+      {{ import_result.qualifying_codes | join(", ") }}
+    </p>
+    {% endif %}
+    {% if import_result.unrecognized_codes %}
+    <p>
+      <strong>Do not qualify:</strong>
+      {{ import_result.unrecognized_codes | join(", ") }}
+    </p>
+    <p class="help-text">
+      If an excused reason is listed under “do not qualify”, add that exact
+      label to <code>ALLOWABLE_ABSENCE_CODES</code> in <code>.env</code> and
+      restart the server.
+    </p>
+    {% endif %}
   </div>
   {% endif %}
   {% endif %}
@@ -67,7 +110,7 @@
 
   <form class="upload-form" action="/admin/attendance/upload" method="post" enctype="multipart/form-data">
     <label for="file">Attendance export file</label>
-    <input id="file" name="file" type="file" accept=".txt,.tsv,.csv,.xlsx,.xlsm,.xls" required>
+    <input id="file" name="file" type="file" accept=".txt,.tsv,.csv,.xlsx,.xlsm" required>
     <button type="submit">Upload and import</button>
   </form>
 

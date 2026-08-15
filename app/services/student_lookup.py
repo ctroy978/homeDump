@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from app.services.eligibility import check_eligibility, is_allowable_code
+from app.services.sis import find_student_row_by_sis, normalize_sis_number
 
 LOOKUP_FAILURE_MESSAGE = (
     "We couldn't find matching makeup homework. "
@@ -33,26 +34,18 @@ class AssignmentOption:
     period: int
 
 
-def normalize_sis_number(sis_number: object) -> str | None:
-    """
-    Normalize a SIS / student ID for storage and lookup.
+@dataclass(frozen=True)
+class ClaimDiagnosis:
+    """Teacher-facing explanation of why a student can or cannot claim work."""
 
-    - Trims whitespace
-    - Returns None when blank after trim
-    - Rejects values containing a decimal point (e.g. mangled Excel floats)
-    - Does not enforce a fixed length; leading zeros are preserved
-    """
-    if sis_number is None:
-        return None
-    text = str(sis_number).strip()
-    if not text:
-        return None
-    if "." in text:
-        raise ValueError(
-            "Student ID must not contain a decimal point. "
-            "Check the SIS number in the attendance export."
-        )
-    return text
+    sis_number: str
+    period: int
+    absence_date: str | None
+    student: StudentRecord | None
+    summary: str
+    eligible_dates: list[str]
+    blocked_dates: list[tuple[str, str]]
+    assignments: list[AssignmentOption]
 
 
 def get_student_by_sis(
@@ -67,14 +60,7 @@ def get_student_by_sis(
     if not normalized:
         return None
 
-    row = conn.execute(
-        """
-        SELECT id, name, sis_number
-        FROM students
-        WHERE sis_number = ?
-        """,
-        (normalized,),
-    ).fetchone()
+    row = find_student_row_by_sis(conn, normalized)
     if row is None or row["sis_number"] is None:
         return None
 
@@ -197,3 +183,142 @@ def list_eligible_assignments_by_sis(
         absence_date,
     )
     return student, options
+
+
+def _period_absence_rows(
+    conn: sqlite3.Connection,
+    student_id: int,
+    period: int,
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT absence_date, absence_code
+        FROM attendance_records
+        WHERE student_id = ? AND period = ?
+        ORDER BY absence_date DESC
+        """,
+        (student_id, period),
+    ).fetchall()
+
+
+def diagnose_claim(
+    conn: sqlite3.Connection,
+    sis_number: str,
+    period: int,
+    absence_date: str | None = None,
+) -> ClaimDiagnosis:
+    """Explain claim eligibility for a teacher standing next to a student."""
+    date = absence_date.strip() if absence_date else None
+    if date == "":
+        date = None
+
+    empty = ClaimDiagnosis(
+        sis_number=str(sis_number).strip(),
+        period=period,
+        absence_date=date,
+        student=None,
+        summary="",
+        eligible_dates=[],
+        blocked_dates=[],
+        assignments=[],
+    )
+
+    try:
+        normalized = normalize_sis_number(sis_number)
+    except ValueError as exc:
+        return ClaimDiagnosis(**{**empty.__dict__, "summary": str(exc)})
+    if not normalized:
+        return ClaimDiagnosis(
+            **{**empty.__dict__, "summary": "Enter a student ID."}
+        )
+
+    student = get_student_by_sis(conn, normalized)
+    if student is None:
+        return ClaimDiagnosis(
+            **{
+                **empty.__dict__,
+                "sis_number": normalized,
+                "summary": (
+                    "No student with this ID is in the attendance database. "
+                    "Upload the class export that contains them."
+                ),
+            }
+        )
+
+    eligible_dates = list_eligible_dates_for_student(conn, period, student.id)
+    rows = _period_absence_rows(conn, student.id, period)
+    blocked: list[tuple[str, str]] = []
+    for row in rows:
+        day = str(row["absence_date"])
+        if day in eligible_dates:
+            continue
+        code = str(row["absence_code"])
+        if not is_allowable_code(code):
+            blocked.append((day, f"Absence code is not allowable: {code}"))
+        else:
+            blocked.append(
+                (day, "Allowable absence, but no homework is assigned for this date.")
+            )
+
+    if date:
+        result = check_eligibility(conn, student.id, period, date)
+        assignments = (
+            list_eligible_assignments_for_student(conn, period, student.id, date)
+            if result.eligible
+            else []
+        )
+        if not result.eligible:
+            summary = f"{student.name}: {result.reason}"
+        elif not assignments:
+            summary = (
+                f"{student.name} has an allowable absence on {date}, but no "
+                "homework is assigned for this period and date."
+            )
+        else:
+            summary = (
+                f"{student.name} can claim {len(assignments)} assignment(s) "
+                f"for period {period} on {date}."
+            )
+        return ClaimDiagnosis(
+            sis_number=student.sis_number,
+            period=period,
+            absence_date=date,
+            student=student,
+            summary=summary,
+            eligible_dates=eligible_dates,
+            blocked_dates=blocked,
+            assignments=assignments,
+        )
+
+    if eligible_dates:
+        summary = (
+            f"{student.name} has {len(eligible_dates)} eligible date(s) "
+            f"in period {period}."
+        )
+    elif not rows:
+        summary = (
+            f"{student.name} has no attendance records for period {period}."
+        )
+    elif any(
+        is_allowable_code(str(row["absence_code"])) for row in rows
+    ):
+        summary = (
+            f"{student.name} has allowable absences in period {period}, "
+            "but no matching homework is uploaded for those dates."
+        )
+    else:
+        summary = (
+            f"{student.name} has attendance in period {period}, but none of "
+            "the codes qualify for makeup."
+        )
+
+    return ClaimDiagnosis(
+        sis_number=student.sis_number,
+        period=period,
+        absence_date=None,
+        student=student,
+        summary=summary,
+        eligible_dates=eligible_dates,
+        blocked_dates=blocked,
+        assignments=[],
+    )

@@ -59,6 +59,74 @@ def _generate_token(conn: sqlite3.Connection) -> str:
     raise RuntimeError("Failed to generate a unique claim token.")
 
 
+def _existing_claim_token(
+    conn: sqlite3.Connection,
+    *,
+    student_id: int,
+    assignment_id: int,
+    period: int,
+    absence_date: str,
+) -> str | None:
+    row = conn.execute(
+        """
+        SELECT token
+        FROM claim_tokens
+        WHERE student_id = ? AND assignment_id = ? AND absence_date = ? AND period = ?
+        """,
+        (student_id, assignment_id, absence_date, period),
+    ).fetchone()
+    if row is None:
+        return None
+    return str(row["token"])
+
+
+def _issue_or_reuse_token(
+    conn: sqlite3.Connection,
+    *,
+    student_id: int,
+    assignment_id: int,
+    period: int,
+    absence_date: str,
+) -> str:
+    """Insert a claim token, or return the existing one on a double-submit."""
+    existing = _existing_claim_token(
+        conn,
+        student_id=student_id,
+        assignment_id=assignment_id,
+        period=period,
+        absence_date=absence_date,
+    )
+    if existing is not None:
+        return existing
+
+    for _ in range(10):
+        token = _generate_token(conn)
+        try:
+            conn.execute(
+                """
+                INSERT INTO claim_tokens (
+                    token, student_id, assignment_id, period, absence_date
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (token, student_id, assignment_id, period, absence_date),
+            )
+            conn.commit()
+            return token
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            raced = _existing_claim_token(
+                conn,
+                student_id=student_id,
+                assignment_id=assignment_id,
+                period=period,
+                absence_date=absence_date,
+            )
+            if raced is not None:
+                return raced
+    raise RuntimeError("Failed to issue a unique claim token.")
+
+
 def _assignment_for_period(
     conn: sqlite3.Connection,
     assignment_id: int,
@@ -266,29 +334,13 @@ def process_claim(
         raise ClaimError(eligibility.reason)
 
     student_id = student.id
-    existing = conn.execute(
-        """
-        SELECT token
-        FROM claim_tokens
-        WHERE student_id = ? AND assignment_id = ? AND absence_date = ? AND period = ?
-        """,
-        (student_id, assignment_id, date, period),
-    ).fetchone()
-
-    if existing is None:
-        token = _generate_token(conn)
-        conn.execute(
-            """
-            INSERT INTO claim_tokens (
-                token, student_id, assignment_id, period, absence_date
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (token, student_id, assignment_id, period, date),
-        )
-        conn.commit()
-    else:
-        token = str(existing["token"])
+    token = _issue_or_reuse_token(
+        conn,
+        student_id=student_id,
+        assignment_id=assignment_id,
+        period=period,
+        absence_date=date,
+    )
 
     lines = _watermark_lines(
         name,
@@ -299,11 +351,18 @@ def process_claim(
     )
 
     pdf_destination = claim_pdf_path(token)
-    watermark_pdf(
-        get_assignment_pdf_path(assignment_id),
-        pdf_destination,
-        lines,
-    )
+    try:
+        watermark_pdf(
+            get_assignment_pdf_path(assignment_id),
+            pdf_destination,
+            lines,
+        )
+    except ClaimError:
+        raise
+    except Exception as exc:
+        raise ClaimError(
+            "Could not prepare this homework for printing. Ask your teacher."
+        ) from exc
 
     log_claim(
         conn,

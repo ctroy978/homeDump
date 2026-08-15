@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -50,6 +52,17 @@ app.include_router(admin.router)
 app.include_router(distribution.router)
 app.include_router(student.router)
 app.include_router(dev.router)
+
+
+@app.exception_handler(RequestValidationError)
+async def handle_request_validation_error(
+    request: Request,
+    exc: RequestValidationError,
+):
+    """Keep student HTMX forms on HTML when FastAPI rejects the input."""
+    if request.url.path.startswith("/student"):
+        return student.student_validation_error(request)
+    return await request_validation_exception_handler(request, exc)
 
 
 @app.get("/health")

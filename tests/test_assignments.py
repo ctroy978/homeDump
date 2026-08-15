@@ -231,6 +231,40 @@ def test_list_assignments_includes_github_source_fields(
     assert results[0].github_path == "unit2/ch04.pdf"
 
 
+def test_delete_assignment_clears_print_queue_rows(
+    db_conn: sqlite3.Connection,
+) -> None:
+    assignment_id = create_assignment(
+        db_conn,
+        periods=[0],
+        assigned_date="2025-09-29",
+        title="Week 1",
+        description=None,
+        pdf_bytes=b"%PDF-1.4 test",
+        original_filename="week1.pdf",
+    )
+    db_conn.execute(
+        "INSERT INTO students (sis_number, name) VALUES ('10001', 'Test Student A')"
+    )
+    student_id = int(db_conn.execute("SELECT id FROM students").fetchone()["id"])
+    db_conn.execute(
+        """
+        INSERT INTO claim_tokens (
+            token, student_id, assignment_id, period, absence_date
+        ) VALUES ('ABCD1234', ?, ?, 0, '2025-09-29')
+        """,
+        (student_id, assignment_id),
+    )
+    db_conn.execute("INSERT INTO print_queue (token) VALUES ('ABCD1234')")
+    db_conn.commit()
+
+    delete_assignment(db_conn, assignment_id)
+
+    assert db_conn.execute("SELECT COUNT(*) FROM assignments").fetchone()[0] == 0
+    assert db_conn.execute("SELECT COUNT(*) FROM claim_tokens").fetchone()[0] == 0
+    assert db_conn.execute("SELECT COUNT(*) FROM print_queue").fetchone()[0] == 0
+
+
 def test_delete_assignment_nullifies_distribution_events_fk(
     db_conn: sqlite3.Connection,
 ) -> None:

@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections.abc import Generator
 from pathlib import Path
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # SQL for all tables. Created in Phase 1; populated in later phases.
 SCHEMA_SQL = """
@@ -89,9 +92,16 @@ def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     path = db_path or settings.database_path
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(path, check_same_thread=False)
+    conn = sqlite3.connect(path, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError as exc:
+        if "readonly" not in str(exc).lower():
+            raise
+        logger.warning("Could not enable WAL; database is read-only: %s", exc)
     return conn
 
 
@@ -202,6 +212,14 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     if "printed_at" not in claim_columns:
         conn.execute("ALTER TABLE claim_tokens ADD COLUMN printed_at TEXT")
 
+    _dedupe_claim_tokens(conn)
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_tokens_identity
+        ON claim_tokens (student_id, assignment_id, absence_date, period)
+        """
+    )
+
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS assignment_periods (
@@ -271,6 +289,25 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     )
 
 
+def _dedupe_claim_tokens(conn: sqlite3.Connection) -> None:
+    """Keep the oldest row per student/assignment/date/period before uniquing."""
+    extras = conn.execute(
+        """
+        SELECT token
+        FROM claim_tokens
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM claim_tokens
+            GROUP BY student_id, assignment_id, absence_date, period
+        )
+        """
+    ).fetchall()
+    for row in extras:
+        token = str(row["token"])
+        conn.execute("DELETE FROM print_queue WHERE token = ?", (token,))
+        conn.execute("DELETE FROM claim_tokens WHERE token = ?", (token,))
+
+
 def init_schema(conn: sqlite3.Connection | None = None) -> None:
     """
     Create all tables if they are missing.
@@ -283,6 +320,12 @@ def init_schema(conn: sqlite3.Connection | None = None) -> None:
         db.executescript(SCHEMA_SQL)
         _apply_migrations(db)
         db.commit()
+    except sqlite3.OperationalError as exc:
+        if "readonly" not in str(exc).lower():
+            raise
+        # TestClient lifespan opens the classroom file as the developer user,
+        # who may not own data/app.db. The request-scoped test DB is writable.
+        logger.warning("Skipping schema changes; database is read-only: %s", exc)
     finally:
         if owns_connection:
             db.close()

@@ -179,6 +179,134 @@ def test_process_claim_is_idempotent(
     assert token_count == 1
 
 
+def test_duplicate_claim_identity_is_rejected_by_schema(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, test_settings = claim_env
+    assignment_id = _seed_assignment(conn, test_settings)
+    process_claim(
+        conn,
+        sis_number="10001",
+        assignment_id=assignment_id,
+        period=0,
+        absence_date="2025-09-29",
+        public_base_url="http://classroom.test:8000",
+    )
+    student_id = conn.execute(
+        "SELECT id FROM students WHERE sis_number = '10001'"
+    ).fetchone()["id"]
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """
+            INSERT INTO claim_tokens (
+                token, student_id, assignment_id, period, absence_date
+            ) VALUES ('DEADBEEF', ?, ?, 0, '2025-09-29')
+            """,
+            (student_id, assignment_id),
+        )
+
+
+def test_issue_or_reuse_token_returns_existing_after_integrity_error(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, test_settings = claim_env
+    assignment_id = _seed_assignment(conn, test_settings)
+    first = process_claim(
+        conn,
+        sis_number="10001",
+        assignment_id=assignment_id,
+        period=0,
+        absence_date="2025-09-29",
+        public_base_url="http://classroom.test:8000",
+    )
+    from app.services.claims import _issue_or_reuse_token
+
+    student_id = int(
+        conn.execute("SELECT id FROM students WHERE sis_number = '10001'").fetchone()[
+            "id"
+        ]
+    )
+    reused = _issue_or_reuse_token(
+        conn,
+        student_id=student_id,
+        assignment_id=assignment_id,
+        period=0,
+        absence_date="2025-09-29",
+    )
+    assert reused == first.token
+    assert conn.execute("SELECT COUNT(*) FROM claim_tokens").fetchone()[0] == 1
+
+
+def test_init_schema_dedupes_duplicate_claim_tokens(tmp_path: Path) -> None:
+    db_path = tmp_path / "dupes.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.executescript(
+        """
+        CREATE TABLE students (
+            id INTEGER PRIMARY KEY,
+            sis_number TEXT,
+            name TEXT NOT NULL
+        );
+        CREATE TABLE assignments (
+            id INTEGER PRIMARY KEY,
+            assigned_date TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            pdf_filename TEXT NOT NULL
+        );
+        CREATE TABLE claim_tokens (
+            id INTEGER PRIMARY KEY,
+            token TEXT NOT NULL UNIQUE,
+            student_id INTEGER NOT NULL,
+            assignment_id INTEGER NOT NULL,
+            period INTEGER,
+            absence_date TEXT NOT NULL
+        );
+        CREATE TABLE print_queue (
+            id INTEGER PRIMARY KEY,
+            token TEXT NOT NULL UNIQUE,
+            queued_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        """
+    )
+    conn.execute("INSERT INTO students (id, sis_number, name) VALUES (1, '1', 'A')")
+    conn.execute(
+        """
+        INSERT INTO assignments (id, assigned_date, title, pdf_filename)
+        VALUES (1, '2025-09-29', 'W', 'w.pdf')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO claim_tokens (token, student_id, assignment_id, period, absence_date)
+        VALUES ('AAAA1111', 1, 1, 0, '2025-09-29')
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO claim_tokens (token, student_id, assignment_id, period, absence_date)
+        VALUES ('BBBB2222', 1, 1, 0, '2025-09-29')
+        """
+    )
+    conn.execute("INSERT INTO print_queue (token) VALUES ('BBBB2222')")
+    conn.commit()
+    conn.close()
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    init_schema(conn)
+    tokens = [
+        row["token"]
+        for row in conn.execute("SELECT token FROM claim_tokens ORDER BY id")
+    ]
+    assert tokens == ["AAAA1111"]
+    assert conn.execute("SELECT COUNT(*) FROM print_queue").fetchone()[0] == 0
+    conn.close()
+
+
 def test_process_claim_rejects_ineligible_student(
     claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
 ) -> None:
@@ -241,6 +369,25 @@ def test_process_claim_rejects_unknown_sis(
         process_claim(
             conn,
             sis_number="999999",
+            assignment_id=assignment_id,
+            period=0,
+            absence_date="2025-09-29",
+            public_base_url="http://classroom.test:8000",
+        )
+
+
+def test_process_claim_wraps_corrupt_pdf_as_claim_error(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, test_settings = claim_env
+    assignment_id = _seed_assignment(conn, test_settings)
+    pdf_path = test_settings.assignments_dir / str(assignment_id) / "original.pdf"
+    pdf_path.write_bytes(b"not a pdf")
+
+    with pytest.raises(ClaimError, match="Could not prepare this homework"):
+        process_claim(
+            conn,
+            sis_number="10001",
             assignment_id=assignment_id,
             period=0,
             absence_date="2025-09-29",

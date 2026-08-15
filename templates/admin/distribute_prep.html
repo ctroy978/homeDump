@@ -3,7 +3,7 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block head %}
-<script src="https://unpkg.com/htmx.org@2.0.4"></script>
+<script src="/static/htmx.min.js"></script>
 {% endblock %}
 
 {% block content %}
@@ -24,13 +24,7 @@
   {% if error %}
   <p class="status-note error">{{ error }}</p>
   {% endif %}
-
-  {% if not repos %}
-  <p class="status-note error">
-    No worksheet repos found. Confirm <code>GITHUB_TOKEN</code> access to
-    <code>scope_*</code> repos under your GitHub account.
-  </p>
-  {% else %}
+  {% if repos %}
   <form class="assignment-filter-form" id="worksheet-search">
     <label for="repo">Repository</label>
     <select
@@ -83,6 +77,11 @@
       }
     });
   </script>
+  {% elif not error %}
+  <p class="status-note error">
+    No worksheet repos found. Confirm <code>GITHUB_TOKEN</code> access to
+    <code>scope_*</code> repos under your GitHub account.
+  </p>
   {% endif %}
 </section>
 {% endblock %}

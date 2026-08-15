@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -19,6 +21,16 @@ from app.services.student_lookup import (
 
 router = APIRouter(prefix="/student", tags=["student"])
 templates = Jinja2Templates(directory=str(settings.project_root / "templates"))
+logger = logging.getLogger(__name__)
+
+STUDENT_UNEXPECTED_MESSAGE = (
+    "Something went wrong while loading makeup homework. "
+    "Try again, or ask your teacher if it keeps happening."
+)
+STUDENT_VALIDATION_MESSAGE = (
+    "We couldn't read that request. Check your period and student ID, "
+    "or ask your teacher."
+)
 
 
 def _client_ip(request: Request) -> str | None:
@@ -27,12 +39,38 @@ def _client_ip(request: Request) -> str | None:
     return request.client.host
 
 
-def _lookup_failure_response(request: Request) -> HTMLResponse:
+def _lookup_failure_response(
+    request: Request,
+    message: str = LOOKUP_FAILURE_MESSAGE,
+) -> HTMLResponse:
     return templates.TemplateResponse(
         request=request,
         name="student/_lookup_failure.html",
-        context={"message": LOOKUP_FAILURE_MESSAGE},
+        context={"message": message},
     )
+
+
+def _claim_error_response(request: Request, message: str) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="student/_claim_error.html",
+        context={"message": message},
+    )
+
+
+def unexpected_student_error(request: Request) -> HTMLResponse:
+    """HTML error partial so HTMX can swap it in (JSON 500s would look like a freeze)."""
+    logger.exception("Unexpected error on student route %s", request.url.path)
+    if request.url.path.rstrip("/").endswith("/confirm"):
+        return _claim_error_response(request, STUDENT_UNEXPECTED_MESSAGE)
+    return _lookup_failure_response(request, STUDENT_UNEXPECTED_MESSAGE)
+
+
+def student_validation_error(request: Request) -> HTMLResponse:
+    """HTML stand-in for FastAPI 422 JSON on student HTMX endpoints."""
+    if request.url.path.rstrip("/").endswith("/confirm"):
+        return _claim_error_response(request, STUDENT_VALIDATION_MESSAGE)
+    return _lookup_failure_response(request, STUDENT_VALIDATION_MESSAGE)
 
 
 @router.get("/sis-field", response_class=HTMLResponse)
@@ -56,7 +94,10 @@ def student_lookup(
     db=Depends(get_db),
 ) -> HTMLResponse:
     """Resolve a student by SIS and reveal only their eligible absence dates."""
-    student, dates = list_eligible_dates_by_sis(db, period, sis_number)
+    try:
+        student, dates = list_eligible_dates_by_sis(db, period, sis_number)
+    except Exception:  # noqa: BLE001 — never 500 a student Chromebook
+        return unexpected_student_error(request)
     if student is None or not dates:
         return _lookup_failure_response(request)
 
@@ -80,9 +121,12 @@ def student_assignments(
     date: str = Form(..., min_length=10, max_length=10),
     db=Depends(get_db),
 ) -> HTMLResponse:
-    student, assignments = list_eligible_assignments_by_sis(
-        db, period, sis_number, date
-    )
+    try:
+        student, assignments = list_eligible_assignments_by_sis(
+            db, period, sis_number, date
+        )
+    except Exception:  # noqa: BLE001 — never 500 a student Chromebook
+        return unexpected_student_error(request)
     if student is None or not assignments:
         return _lookup_failure_response(request)
 
@@ -139,19 +183,11 @@ def student_confirm(
 
         newly_queued = enqueue_token(db, result.token)
     except PublicUrlError as exc:
-        return templates.TemplateResponse(
-            request=request,
-            name="student/_claim_error.html",
-            context={"message": str(exc)},
-            status_code=400,
-        )
+        return _claim_error_response(request, str(exc))
     except ClaimError as exc:
-        return templates.TemplateResponse(
-            request=request,
-            name="student/_claim_error.html",
-            context={"message": str(exc)},
-            status_code=400,
-        )
+        return _claim_error_response(request, str(exc))
+    except Exception:  # noqa: BLE001 — never 500 a student Chromebook
+        return unexpected_student_error(request)
 
     confirm_result = ClaimResult(
         token=result.token,

@@ -68,6 +68,39 @@ def test_prep_redirects_when_github_disabled(
     assert "prep_error=github_disabled" in response.headers["location"]
 
 
+def test_prep_page_survives_github_api_failure(
+    admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.github_worksheets import GitHubWorksheetError
+
+    def boom(**kwargs):
+        raise GitHubWorksheetError("GitHub API rate limit exceeded.")
+
+    monkeypatch.setattr(distribution_router, "list_filtered_repos", boom)
+    response = admin_client.get("/admin/distribute/prep")
+    assert response.status_code == 200
+    assert "GitHub worksheets" in response.text
+    assert "rate limit" in response.text
+    assert "Internal Server Error" not in response.text
+
+
+def test_prep_browse_survives_github_api_failure(
+    admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services.github_worksheets import GitHubWorksheetError
+
+    def boom(*args, **kwargs):
+        raise GitHubWorksheetError("GitHub is unavailable.")
+
+    monkeypatch.setattr(distribution_router, "browse_pdf_worksheets", boom)
+    response = admin_client.get(f"/admin/distribute/prep/browse?repo={REPO}")
+    assert response.status_code == 400
+    assert "unavailable" in response.text
+    assert "Internal Server Error" not in response.text
+
+
 def test_prep_page_lists_worksheets(
     admin_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -98,6 +131,8 @@ def test_prep_page_lists_worksheets(
 
     response = admin_client.get("/admin/distribute/prep")
     assert response.status_code == 200
+    assert 'src="/static/htmx.min.js"' in response.text
+    assert "unpkg.com/htmx" not in response.text
     assert "GitHub worksheets" in response.text
     assert REPO in response.text
     assert "unit2" in response.text

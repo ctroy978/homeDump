@@ -12,7 +12,9 @@ from app.services.eligibility import (
     EligibilityResult,
     check_eligibility,
     is_allowable_code,
+    normalize_absence_code,
     normalize_text,
+    summarize_absence_codes,
 )
 
 
@@ -26,6 +28,9 @@ from app.services.eligibility import (
         ("In-School Absence", True),
         ("Tardy Excused", True),
         ("Nurse\u2019s Office", True),  # curly apostrophe from real exports
+        ("illness", True),
+        ("EXCUSED ABSENCE", True),
+        ("Excused  Absence", True),
         ("Unexcused Absence", False),
         ("Tardy Unexcused", False),
         ("Early Check Out", False),
@@ -38,6 +43,23 @@ def test_is_allowable_code(code: str, expected: bool) -> None:
 
 def test_normalize_text_apostrophes() -> None:
     assert normalize_text("Nurse\u2019s Office") == "Nurse's Office"
+
+
+def test_normalize_absence_code_folds_case_and_spaces() -> None:
+    assert normalize_absence_code("Excused  Absence") == normalize_absence_code(
+        "excused absence"
+    )
+    assert normalize_absence_code("Nurse\u2019s Office") == normalize_absence_code(
+        "Nurse's Office"
+    )
+
+
+def test_summarize_absence_codes_splits_allowable() -> None:
+    qualifying, unrecognized = summarize_absence_codes(
+        ["Illness", "illness", "Unexcused Absence", "  Tardy Unexcused "]
+    )
+    assert qualifying == ["Illness"]
+    assert unrecognized == ["Tardy Unexcused", "Unexcused Absence"]
 
 
 def _test_student_id(db_conn: sqlite3.Connection) -> int:
@@ -87,6 +109,24 @@ def test_check_eligibility_unknown_student(db_conn: sqlite3.Connection) -> None:
     result = check_eligibility(db_conn, 999_999, 1, "2025-10-20")
     assert result.eligible is False
     assert "not found" in result.reason.lower()
+
+
+def test_check_eligibility_ignores_code_case(
+    db_conn: sqlite3.Connection,
+) -> None:
+    student_id = _test_student_id(db_conn)
+    db_conn.execute(
+        """
+        UPDATE attendance_records
+        SET absence_code = 'illness'
+        WHERE student_id = ? AND absence_date = '2025-10-20' AND period = 1
+        """,
+        (student_id,),
+    )
+    db_conn.commit()
+    result = check_eligibility(db_conn, student_id, 1, "2025-10-20")
+    assert result.eligible is True
+    assert result.absence_code == "illness"
 
 
 def test_check_eligibility_same_name_different_sis(
