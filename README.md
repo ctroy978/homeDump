@@ -56,23 +56,22 @@ are **per student**, not per class. **Student ID (SIS number) is the only identi
 
 1. The file **must** include a **Sis Number** column (plus Student Name, Date, and
    Period 0–7).
-2. The app finds every student in the file **by SIS number**.
-3. For each student with a valid SIS, it **deletes all of their attendance** and
-   reloads year-to-date rows from that file, then **commits that student** before
-   moving on. One bad student does not block the rest of the class.
-4. Students **without a SIS** are **rejected** and listed on the upload result page
-   (with their name when available) so you can fix the ID and re-upload.
-5. Students who are not in the file are left unchanged.
+2. You **must choose which class period this export is** (the class you pulled).
+3. The app finds every student in the file **by SIS number**.
+4. For each student with a valid SIS, it **replaces only that period’s absences**
+   from the year-to-date file, then **commits that student** before moving on.
+   Other periods are left alone. One bad student does not block the rest.
+5. Students in the file are recorded as **having you that period**. Students
+   **without a SIS** are **rejected** and listed so you can fix the ID.
+6. Students who disappear from a later upload of the same period are marked
+   inactive for that class but keep old absences for leftover makeup.
 
-This lets you upload Period 3, then Period 5, without wiping other classes.
+This lets you upload Period 1, then Period 3, without mixing those rosters.
 Re-upload whenever late excused notes arrive.
 
-**Schedule changes (Period 3 → Period 5):** once a student moves, they disappear
-from the Period 3 export and show up in Period 5. Upload the **Period 5** report
-to refresh them — the year-to-date export should include their full history,
-including older Period 3 absences with any updated codes. Their old snapshot
-stays put until they appear in a new upload, so always refresh from the class
-export that currently contains them.
+**Schedule changes (Period 1 → Period 5):** upload the **Period 5** export and
+tag it as period 5. Their period 1 history stays; they are no longer offered
+new period 1 work unless they appear in a later period 1 upload.
 
 ## Verify Phase 2 (attendance upload)
 

@@ -129,6 +129,24 @@ def test_student_validation_error_is_html_not_json(client: TestClient) -> None:
     assert "Check your period and student ID" in response.text
 
 
+def test_attendance_upload_requires_class_period(client: TestClient) -> None:
+    from app.dependencies import ADMIN_COOKIE_NAME, _expected_admin_token
+
+    client.cookies.set(ADMIN_COOKIE_NAME, _expected_admin_token())
+    response = client.get("/admin/attendance")
+    assert response.status_code == 200
+    assert "This export is for class period" in response.text
+    assert 'name="class_period"' in response.text
+
+    response = client.post(
+        "/admin/attendance/upload",
+        data={},
+        files={"file": ("att.txt", b"Student Name\tSis Number\n", "text/plain")},
+    )
+    assert response.status_code == 400
+    assert "class period" in response.text.lower()
+
+
 def test_admin_eligibility_requires_login(client: TestClient) -> None:
     response = client.get("/admin/eligibility", follow_redirects=False)
     assert response.status_code == 303

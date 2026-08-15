@@ -39,6 +39,14 @@ NO_USABLE_ROWS_MESSAGE = (
     "No usable attendance rows for this student (check dates in the export). "
     "Existing records were left unchanged."
 )
+INVALID_CLASS_PERIOD_MESSAGE = "Choose a class period from 0 to 7 for this upload."
+
+
+def validate_class_period(period: int) -> int:
+    value = int(period)
+    if not 0 <= value <= 7:
+        raise ValueError(INVALID_CLASS_PERIOD_MESSAGE)
+    return value
 HEADER_MISSING_MESSAGE = (
     "Could not find attendance header row. The file must include "
     "columns named 'Student Name', 'Date', and at least one 'Period 0'–'Period 7'."
@@ -92,6 +100,8 @@ class AttendanceParseResult:
     rejections: list[StudentImportRejection] = field(default_factory=list)
     qualifying_codes: list[str] = field(default_factory=list)
     unrecognized_codes: list[str] = field(default_factory=list)
+    class_period: int | None = None
+    roster_removed: int = 0
 
     @property
     def outcome(self) -> str:
@@ -352,6 +362,7 @@ def load_attendance_dataframe(path: Path) -> pd.DataFrame:
 
 def parse_attendance_rows(
     df: pd.DataFrame,
+    class_period: int,
 ) -> tuple[
     list[dict[str, object]],
     int,
@@ -371,6 +382,18 @@ def parse_attendance_rows(
     period_columns = _find_period_columns(columns)
     if not period_columns:
         raise ValueError("No Period 0–7 columns found in the attendance file.")
+
+    class_period = validate_class_period(class_period)
+    if class_period not in period_columns.values():
+        raise ValueError(
+            f"This file has no Period {class_period} column. "
+            "Use an export that includes that period."
+        )
+    period_columns = {
+        column: period
+        for column, period in period_columns.items()
+        if period == class_period
+    }
 
     date_col = _require_column(columns, "Date")
     note_col = _optional_column(columns, "Note")
@@ -509,6 +532,7 @@ def student_identity_key(name: str, sis_number: str | None) -> str:
 
 def extract_students_from_dataframe(
     df: pd.DataFrame,
+    class_period: int,
 ) -> tuple[dict[str, StudentRosterEntry], list[StudentImportRejection]]:
     """
     Return every SIS-identified student in the export, plus rejections.
@@ -516,7 +540,7 @@ def extract_students_from_dataframe(
     Identity is SIS only. Display names may collide. Last row wins for name/grade
     when the same SIS appears more than once.
     """
-    _, _, _, roster, rejections = parse_attendance_rows(df)
+    _, _, _, roster, rejections = parse_attendance_rows(df, class_period)
     return roster, rejections
 
 
@@ -556,20 +580,38 @@ def upsert_student(
     return int(row["id"])
 
 
-def _clear_attendance_for_student(conn: sqlite3.Connection, student_id: int) -> int:
-    """Remove all attendance rows for one student before reloading their snapshot."""
+def _clear_attendance_for_student_period(
+    conn: sqlite3.Connection,
+    student_id: int,
+    class_period: int,
+) -> int:
+    """Remove one period's attendance rows for a student before reloading it."""
     cursor = conn.execute(
-        "DELETE FROM attendance_records WHERE student_id = ?",
-        (student_id,),
+        "DELETE FROM attendance_records WHERE student_id = ? AND period = ?",
+        (student_id, class_period),
     )
     return int(cursor.rowcount)
 
 
-def _existing_attendance_count(conn: sqlite3.Connection, student_id: int) -> int:
-    row = conn.execute(
-        "SELECT COUNT(*) AS total FROM attendance_records WHERE student_id = ?",
-        (student_id,),
-    ).fetchone()
+def _existing_attendance_count(
+    conn: sqlite3.Connection,
+    student_id: int,
+    class_period: int | None = None,
+) -> int:
+    if class_period is None:
+        row = conn.execute(
+            "SELECT COUNT(*) AS total FROM attendance_records WHERE student_id = ?",
+            (student_id,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM attendance_records
+            WHERE student_id = ? AND period = ?
+            """,
+            (student_id, class_period),
+        ).fetchone()
     return int(row["total"])
 
 
@@ -602,16 +644,17 @@ def replace_attendance_for_student(
     parsed_rows: list[dict[str, object]],
     student_key: str,
     upload_id: int,
+    class_period: int,
 ) -> tuple[int, int]:
     """
-    Replace one student's attendance with the rows from the current export.
+    Replace one student's attendance for ``class_period`` only.
 
     Returns ``(records_cleared, records_inserted)``.
     """
     records_by_key = _records_for_student(
         parsed_rows, student_key, student_id, upload_id
     )
-    cleared = _clear_attendance_for_student(conn, student_id)
+    cleared = _clear_attendance_for_student_period(conn, student_id, class_period)
 
     for values in records_by_key.values():
         conn.execute(
@@ -641,16 +684,19 @@ def _import_one_student(
     parsed_rows: list[dict[str, object]],
     parseable_dates: int,
     upload_id: int,
+    class_period: int,
 ) -> tuple[int, int]:
     """
-    Upsert one student and replace their attendance.
+    Upsert one student and replace their attendance for ``class_period``.
 
     Raises ValueError when the refresh would wipe existing data with no usable
     rows (unparseable dates only).
     """
     existing = find_student_row_by_sis(conn, entry.sis_number)
     prior_count = (
-        _existing_attendance_count(conn, int(existing["id"])) if existing else 0
+        _existing_attendance_count(conn, int(existing["id"]), class_period)
+        if existing
+        else 0
     )
 
     if prior_count > 0 and parseable_dates == 0:
@@ -668,24 +714,84 @@ def _import_one_student(
         parsed_rows,
         entry.key,
         upload_id,
+        class_period,
     )
+
+
+def student_has_class_period(
+    conn: sqlite3.Connection,
+    student_id: int,
+    period: int,
+) -> bool:
+    """True when the student has ever been imported as this teacher's period."""
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM student_class_periods
+        WHERE student_id = ? AND period = ?
+        """,
+        (student_id, period),
+    ).fetchone()
+    return row is not None
+
+
+def _sync_class_period_roster(
+    conn: sqlite3.Connection,
+    class_period: int,
+    member_ids: set[int],
+    upload_id: int,
+) -> int:
+    """Mark file students active for this period; deactivate missing members."""
+    for student_id in member_ids:
+        conn.execute(
+            """
+            INSERT INTO student_class_periods (
+                student_id, period, last_upload_id, active
+            )
+            VALUES (?, ?, ?, 1)
+            ON CONFLICT(student_id, period) DO UPDATE SET
+                last_upload_id = excluded.last_upload_id,
+                active = 1
+            """,
+            (student_id, class_period, upload_id),
+        )
+
+    if member_ids:
+        placeholders = ", ".join("?" for _ in member_ids)
+        cursor = conn.execute(
+            f"""
+            UPDATE student_class_periods
+            SET active = 0
+            WHERE period = ? AND student_id NOT IN ({placeholders})
+            """,
+            (class_period, *member_ids),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            UPDATE student_class_periods
+            SET active = 0
+            WHERE period = ?
+            """,
+            (class_period,),
+        )
+    return int(cursor.rowcount)
 
 
 def ingest_attendance_file(
     conn: sqlite3.Connection,
     source_path: Path,
     original_filename: str,
+    class_period: int,
 ) -> AttendanceParseResult:
     """
-    Parse an attendance workbook and write normalized rows to SQLite.
+    Parse an attendance workbook and write one class period to SQLite.
 
-    Identity is SIS number only (names may collide). Each student is committed
-    independently so one failure does not block the rest of the class file.
-
-    When a student appears in an upload, their attendance is cleared and
-    reloaded from that file's year-to-date rows. Other students are untouched.
-    Students without a SIS are rejected with a teacher-facing message.
+    Identity is SIS number only. Each student is committed independently.
+    Only ``class_period`` absence cells are imported; other periods are left
+    untouched. Students in the file are marked as members of that period.
     """
+    class_period = validate_class_period(class_period)
     df = load_attendance_dataframe(source_path)
     (
         parsed_rows,
@@ -693,11 +799,14 @@ def ingest_attendance_file(
         parseable_dates_by_sis,
         roster,
         rejections,
-    ) = parse_attendance_rows(df)
+    ) = parse_attendance_rows(df, class_period)
 
     cursor = conn.execute(
-        "INSERT INTO attendance_uploads (filename, row_count) VALUES (?, ?)",
-        (original_filename, len(df)),
+        """
+        INSERT INTO attendance_uploads (filename, row_count, class_period)
+        VALUES (?, ?, ?)
+        """,
+        (original_filename, len(df), class_period),
     )
     upload_id = int(cursor.lastrowid)
     # Persist the upload metadata even if every student is later rejected.
@@ -709,8 +818,10 @@ def ingest_attendance_file(
         rows_read=len(df),
         rows_skipped=rows_skipped,
         rejections=list(rejections),
+        class_period=class_period,
     )
 
+    member_ids: set[int] = set()
     for entry in roster.values():
         try:
             cleared, inserted = _import_one_student(
@@ -719,13 +830,20 @@ def ingest_attendance_file(
                 parsed_rows,
                 parseable_dates_by_sis.get(entry.sis_number, 0),
                 upload_id,
+                class_period,
             )
             conn.commit()
             result.records_cleared += cleared
             result.records_upserted += inserted
             result.students_touched += 1
+            found = find_student_row_by_sis(conn, entry.sis_number)
+            if found is not None:
+                member_ids.add(int(found["id"]))
         except Exception as exc:  # noqa: BLE001 — isolate per student
             conn.rollback()
+            existing = find_student_row_by_sis(conn, entry.sis_number)
+            if existing is not None:
+                member_ids.add(int(existing["id"]))
             result.rejections.append(
                 StudentImportRejection(
                     reason=str(exc),
@@ -738,4 +856,12 @@ def ingest_attendance_file(
     result.qualifying_codes, result.unrecognized_codes = summarize_absence_codes(
         [str(row["absence_code"]) for row in parsed_rows]
     )
+    try:
+        result.roster_removed = _sync_class_period_roster(
+            conn, class_period, member_ids, upload_id
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return result

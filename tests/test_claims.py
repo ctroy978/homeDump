@@ -61,6 +61,13 @@ def claim_env(
         """,
         (student_id,),
     )
+    conn.execute(
+        """
+        INSERT INTO student_class_periods (student_id, period, active)
+        VALUES (?, 0, 1)
+        """,
+        (student_id,),
+    )
     conn.commit()
     yield conn, test_settings
     conn.close()

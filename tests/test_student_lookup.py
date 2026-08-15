@@ -191,7 +191,7 @@ def test_diagnose_claim_eligible_with_assignment(
 
 def test_diagnose_claim_period_with_no_records(db_conn: sqlite3.Connection) -> None:
     result = diagnose_claim(db_conn, "10001", 7)
-    assert "no attendance records" in result.summary
+    assert "has not been imported as your period 7" in result.summary
 
 
 def test_lookup_failure_message_is_generic() -> None:

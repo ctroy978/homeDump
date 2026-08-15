@@ -31,7 +31,11 @@ from app.services.assignments import (
     list_assignments,
     write_assignment_pdf,
 )
-from app.services.attendance_parser import SUPPORTED_EXTENSIONS, ingest_attendance_file
+from app.services.attendance_parser import (
+    SUPPORTED_EXTENSIONS,
+    ingest_attendance_file,
+    validate_class_period,
+)
 from app.services.claim_logs import ClaimLogStatus, list_claim_logs
 from app.services.data_backup import (
     BackupError,
@@ -99,18 +103,23 @@ def _attendance_page_context(
 ) -> dict:
     uploads = db.execute(
         """
-        SELECT id, filename, uploaded_at, row_count
+        SELECT id, filename, uploaded_at, row_count, class_period
         FROM attendance_uploads
         ORDER BY uploaded_at DESC
         LIMIT 10
         """
     ).fetchall()
+    last_period = None
+    if uploads and uploads[0]["class_period"] is not None:
+        last_period = int(uploads[0]["class_period"])
     summary = _admin_summary(db)
     context = {
         "title": "Upload Attendance",
         "uploads": uploads,
         "error": error,
         "import_result": import_result,
+        "periods": list(range(8)),
+        "selected_period": last_period,
         **summary,
     }
     return context
@@ -337,6 +346,7 @@ def attendance_upload_page(
 async def upload_attendance(
     request: Request,
     file: UploadFile = File(...),
+    class_period: str = Form(""),
     _admin: None = Depends(require_admin),
     db=Depends(get_db),
 ):
@@ -353,10 +363,22 @@ async def upload_attendance(
             status_code=400,
         )
 
+    try:
+        period = validate_class_period(int(class_period))
+    except (TypeError, ValueError):
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/attendance.html",
+            context=_attendance_page_context(
+                db, "Choose which class period this export is for (0–7)."
+            ),
+            status_code=400,
+        )
+
     saved_path = _save_attendance_upload(file)
 
     try:
-        result = ingest_attendance_file(db, saved_path, filename)
+        result = ingest_attendance_file(db, saved_path, filename, period)
     except Exception as exc:  # noqa: BLE001 — teacher-friendly UI message
         return templates.TemplateResponse(
             request=request,

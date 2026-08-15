@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from app.services.attendance_parser import student_has_class_period
 from app.services.eligibility import check_eligibility, is_allowable_code
 from app.services.sis import find_student_row_by_sis, normalize_sis_number
 
@@ -124,6 +125,8 @@ def list_eligible_dates_by_sis(
     if student is None:
         return None, []
 
+    if not student_has_class_period(conn, student.id, period):
+        return student, []
     dates = list_eligible_dates_for_student(conn, period, student.id)
     return student, dates
 
@@ -175,6 +178,8 @@ def list_eligible_assignments_by_sis(
     student = get_student_by_sis(conn, sis_number)
     if student is None:
         return None, []
+    if not student_has_class_period(conn, student.id, period):
+        return student, []
 
     options = list_eligible_assignments_for_student(
         conn,
@@ -243,6 +248,21 @@ def diagnose_claim(
                     "Upload the class export that contains them."
                 ),
             }
+        )
+
+    if not student_has_class_period(conn, student.id, period):
+        return ClaimDiagnosis(
+            sis_number=student.sis_number,
+            period=period,
+            absence_date=date,
+            student=student,
+            summary=(
+                f"{student.name} has not been imported as your period {period} "
+                "class. Upload that class export and tag it as this period."
+            ),
+            eligible_dates=[],
+            blocked_dates=[],
+            assignments=[],
         )
 
     eligible_dates = list_eligible_dates_for_student(conn, period, student.id)

@@ -15,6 +15,7 @@ from pypdf import PdfReader, PdfWriter
 from app.config import settings
 from app.services.assignments import get_assignment_pdf_path
 from app.services.eligibility import check_eligibility
+from app.services.attendance_parser import student_has_class_period
 from app.services.student_lookup import LOOKUP_FAILURE_MESSAGE, get_student_by_sis
 
 
@@ -295,6 +296,21 @@ def process_claim(
             user_agent=user_agent,
             success=False,
             message="SIS lookup failed during claim.",
+        )
+        raise ClaimError(LOOKUP_FAILURE_MESSAGE)
+
+    if not student_has_class_period(conn, student.id, period):
+        log_claim(
+            conn,
+            student_name=student.name,
+            assignment_id=assignment_id,
+            period=period,
+            absence_date=absence_date.strip(),
+            token=None,
+            client_ip=client_ip,
+            user_agent=user_agent,
+            success=False,
+            message="Student is not in this class period.",
         )
         raise ClaimError(LOOKUP_FAILURE_MESSAGE)
 

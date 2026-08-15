@@ -26,7 +26,16 @@ CREATE TABLE IF NOT EXISTS attendance_uploads (
     id INTEGER PRIMARY KEY,
     filename TEXT NOT NULL,
     uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
-    row_count INTEGER NOT NULL DEFAULT 0
+    row_count INTEGER NOT NULL DEFAULT 0,
+    class_period INTEGER CHECK (class_period IS NULL OR class_period BETWEEN 0 AND 7)
+);
+
+CREATE TABLE IF NOT EXISTS student_class_periods (
+    student_id INTEGER NOT NULL REFERENCES students(id),
+    period INTEGER NOT NULL CHECK (period BETWEEN 0 AND 7),
+    last_upload_id INTEGER REFERENCES attendance_uploads(id),
+    active INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (student_id, period)
 );
 
 CREATE TABLE IF NOT EXISTS attendance_records (
@@ -263,6 +272,28 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS idx_assignments_github_identity
         ON assignments (github_repo, github_path, assigned_date)
         WHERE source = 'github' AND github_repo IS NOT NULL
+        """
+    )
+
+    upload_columns = _table_columns(conn, "attendance_uploads")
+    if "class_period" not in upload_columns:
+        conn.execute(
+            """
+            ALTER TABLE attendance_uploads
+            ADD COLUMN class_period INTEGER
+            CHECK (class_period IS NULL OR class_period BETWEEN 0 AND 7)
+            """
+        )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS student_class_periods (
+            student_id INTEGER NOT NULL REFERENCES students(id),
+            period INTEGER NOT NULL CHECK (period BETWEEN 0 AND 7),
+            last_upload_id INTEGER REFERENCES attendance_uploads(id),
+            active INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (student_id, period)
+        )
         """
     )
 

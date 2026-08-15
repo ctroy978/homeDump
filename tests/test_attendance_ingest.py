@@ -127,11 +127,11 @@ def test_cohort_replace_updates_late_excused_note(tmp_path: Path) -> None:
         ],
     )
 
-    first_result = ingest_attendance_file(conn, first, first.name)
+    first_result = ingest_attendance_file(conn, first, first.name, class_period=3)
     assert first_result.records_cleared == 0
     assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Unexcused Absence"
 
-    second_result = ingest_attendance_file(conn, second, second.name)
+    second_result = ingest_attendance_file(conn, second, second.name, class_period=3)
     assert second_result.records_cleared == 1
     assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Excused Absence"
     assert _count_records(conn, "Alice Example") == 1
@@ -157,8 +157,8 @@ def test_class_uploads_do_not_wipe_other_classes(tmp_path: Path) -> None:
         ],
     )
 
-    ingest_attendance_file(conn, period3, period3.name)
-    ingest_attendance_file(conn, period5, period5.name)
+    ingest_attendance_file(conn, period3, period3.name, class_period=3)
+    ingest_attendance_file(conn, period5, period5.name, class_period=5)
 
     assert _count_records(conn, "Alice Example") == 1
     assert _count_records(conn, "Bob Example") == 1
@@ -168,7 +168,7 @@ def test_class_uploads_do_not_wipe_other_classes(tmp_path: Path) -> None:
         updated_period3,
         [_base_row(name="Alice Example", sis="1001", period3="Excused Absence")],
     )
-    ingest_attendance_file(conn, updated_period3, updated_period3.name)
+    ingest_attendance_file(conn, updated_period3, updated_period3.name, class_period=3)
 
     assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Excused Absence"
     assert _record_code(conn, "Bob Example", "2025-09-10", 5) == "Sports-Athletics"
@@ -195,10 +195,10 @@ def test_removed_absence_is_cleared_on_reupload(tmp_path: Path) -> None:
         [_base_row(name="Alice Example", sis="1001", period3="Illness")],
     )
 
-    ingest_attendance_file(conn, first, first.name)
+    ingest_attendance_file(conn, first, first.name, class_period=3)
     assert _count_records(conn, "Alice Example") == 2
 
-    ingest_attendance_file(conn, second, second.name)
+    ingest_attendance_file(conn, second, second.name, class_period=3)
     assert _count_records(conn, "Alice Example") == 1
     assert _record_code(conn, "Alice Example", "2025-09-03", 3) is None
 
@@ -225,12 +225,13 @@ def test_student_move_periods_refreshes_from_new_class_export(tmp_path: Path) ->
         ],
     )
 
-    ingest_attendance_file(conn, period3, period3.name)
+    ingest_attendance_file(conn, period3, period3.name, class_period=3)
     assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Illness"
     assert _record_code(conn, "Alice Example", "2025-09-02", 5) is None
 
-    ingest_attendance_file(conn, period5, period5.name)
-    assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Excused Absence"
+    ingest_attendance_file(conn, period5, period5.name, class_period=5)
+    # Period 3 history is left alone; only the tagged period 5 column is imported.
+    assert _record_code(conn, "Alice Example", "2025-09-02", 3) == "Illness"
     assert _record_code(conn, "Alice Example", "2025-09-02", 5) == "Sports-Athletics"
 
     row = conn.execute(
@@ -260,7 +261,7 @@ def test_student_with_no_codes_still_clears_old_records(tmp_path: Path) -> None:
         [_base_row(name="Alice Example", sis="1001")],
     )
 
-    result = ingest_attendance_file(conn, empty_export, empty_export.name)
+    result = ingest_attendance_file(conn, empty_export, empty_export.name, class_period=3)
     assert result.records_cleared == 1
     assert _count_records(conn, "Alice Example") == 0
 
@@ -292,7 +293,7 @@ def test_text_export_with_preamble_parses_correctly(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
 
     assert result.students_touched == 1
     assert result.records_upserted == 1
@@ -331,7 +332,7 @@ def test_quoted_column_headers_from_live_export(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
 
     assert result.students_touched == 1
     assert result.records_upserted == 1
@@ -372,7 +373,7 @@ def test_excel_export_with_preamble_parses_correctly(tmp_path: Path) -> None:
     )
     raw.to_excel(export, index=False, header=False)
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
 
     assert result.students_touched == 1
     assert result.records_upserted == 1
@@ -454,7 +455,7 @@ def test_same_display_name_different_sis_both_import(tmp_path: Path) -> None:
         ],
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 2
     assert result.students_rejected == 0
     assert result.records_upserted == 2
@@ -477,7 +478,7 @@ def test_import_outcome_success_partial_failed(tmp_path: Path) -> None:
         good,
         [_base_row(name="Carol Good", sis="3003", period3="Illness")],
     )
-    success = ingest_attendance_file(conn, good, good.name)
+    success = ingest_attendance_file(conn, good, good.name, class_period=3)
     assert success.outcome == "success"
 
     mixed = tmp_path / "mixed.txt"
@@ -488,7 +489,7 @@ def test_import_outcome_success_partial_failed(tmp_path: Path) -> None:
         "Carol Good\t3003\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
         encoding="utf-8",
     )
-    partial = ingest_attendance_file(conn, mixed, mixed.name)
+    partial = ingest_attendance_file(conn, mixed, mixed.name, class_period=3)
     assert partial.outcome == "partial"
 
     bad = tmp_path / "all_bad.txt"
@@ -498,7 +499,7 @@ def test_import_outcome_success_partial_failed(tmp_path: Path) -> None:
         "Alex Rivera\t\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
         encoding="utf-8",
     )
-    failed = ingest_attendance_file(conn, bad, bad.name)
+    failed = ingest_attendance_file(conn, bad, bad.name, class_period=3)
     assert failed.outcome == "failed"
     assert failed.students_touched == 0
 
@@ -515,7 +516,7 @@ def test_missing_sis_rejects_but_others_import(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 1
     assert result.students_rejected == 1
     assert result.records_upserted == 1
@@ -544,7 +545,7 @@ def test_missing_name_with_sis_is_rejected_not_silent(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 1
     assert result.students_rejected == 1
     assert _count_records(conn, "Carol Good") == 1
@@ -571,7 +572,7 @@ def test_blank_name_row_uses_name_from_other_row_same_sis(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 1
     assert result.students_rejected == 0
     assert _count_records(conn, "Alice Example") == 2
@@ -595,7 +596,7 @@ def test_duplicate_sis_in_file_last_write_wins(tmp_path: Path) -> None:
         ],
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 1
     row = conn.execute(
         "SELECT name, sis_number FROM students WHERE sis_number = '1001'"
@@ -614,7 +615,7 @@ def test_garbage_dates_do_not_wipe_existing_attendance(tmp_path: Path) -> None:
             _base_row(name="Carol", sis="3003", period3="Illness"),
         ],
     )
-    ingest_attendance_file(conn, good, good.name)
+    ingest_attendance_file(conn, good, good.name, class_period=3)
     assert _count_by_sis(conn, "4004") == 1
 
     bad = tmp_path / "bad_dates.txt"
@@ -628,7 +629,7 @@ def test_garbage_dates_do_not_wipe_existing_attendance(tmp_path: Path) -> None:
             _base_row(name="Carol", sis="3003", period3="Excused Absence"),
         ],
     )
-    result = ingest_attendance_file(conn, bad, bad.name)
+    result = ingest_attendance_file(conn, bad, bad.name, class_period=3)
 
     assert _count_by_sis(conn, "4004") == 1  # preserved
     assert _record_code(conn, "Carol", "2025-09-02", 3) == "Excused Absence"
@@ -648,7 +649,7 @@ def test_decimal_sis_is_rejected(tmp_path: Path) -> None:
         "Ok\t9999\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n",
         encoding="utf-8",
     )
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 1
     assert result.students_rejected == 1
     assert _count_by_sis(conn, "9999") == 1
@@ -692,7 +693,7 @@ def test_require_sis_number_column(tmp_path: Path) -> None:
     df.to_csv(export, sep="\t", index=False)
     conn = _memory_db()
     try:
-        ingest_attendance_file(conn, export, export.name)
+        ingest_attendance_file(conn, export, export.name, class_period=3)
     except ValueError as exc:
         assert "Sis Number" in str(exc)
     else:
@@ -710,7 +711,7 @@ def test_leading_zeros_preserved_when_sis_is_text(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 2
     stored = [
         row["sis_number"]
@@ -732,7 +733,7 @@ def test_blank_sis_does_not_strip_neighbors_leading_zeros(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 1
     assert result.students_rejected == 1
     row = conn.execute("SELECT sis_number FROM students").fetchone()
@@ -765,7 +766,7 @@ def test_excel_float_sis_does_not_create_duplicate_student(tmp_path: Path) -> No
         ]
     ).to_excel(export, index=False)
 
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert result.students_touched == 1
     assert result.students_rejected == 0
     rows = conn.execute("SELECT id, sis_number, name FROM students").fetchall()
@@ -783,7 +784,7 @@ def test_garbage_dates_respect_leading_zero_equivalent(tmp_path: Path) -> None:
         "Dave\t001001\t10\t2025-09-02\t\t\t\tIllness\t\t\t\t\t\n"
     )
     first.write_text(export_text, encoding="utf-8")
-    ingest_attendance_file(conn, first, first.name)
+    ingest_attendance_file(conn, first, first.name, class_period=3)
     assert _count_by_sis(conn, "001001") == 1
 
     bad = tmp_path / "bad.xlsx"
@@ -807,7 +808,7 @@ def test_garbage_dates_respect_leading_zero_equivalent(tmp_path: Path) -> None:
         ]
     ).to_excel(bad, index=False)
 
-    result = ingest_attendance_file(conn, bad, bad.name)
+    result = ingest_attendance_file(conn, bad, bad.name, class_period=3)
     assert _count_by_sis(conn, "001001") == 1
     assert any("No usable attendance" in r.reason for r in result.rejections)
 
@@ -839,9 +840,106 @@ def test_upload_result_lists_qualifying_and_unrecognized_codes(tmp_path: Path) -
             ),
         ],
     )
-    result = ingest_attendance_file(conn, export, export.name)
+    result = ingest_attendance_file(conn, export, export.name, class_period=3)
     assert "illness" in result.qualifying_codes or "Illness" in result.qualifying_codes
     assert any("Unexcused" in code for code in result.unrecognized_codes)
+
+
+def test_tagged_period_import_ignores_other_period_columns(tmp_path: Path) -> None:
+    conn = _memory_db()
+    export = tmp_path / "period1.txt"
+    row = _base_row(name="Pat", sis="114007", period3="Appointment")
+    row["Period 1"] = "Excused Absence"
+    _write_fixture(export, [row])
+
+    result = ingest_attendance_file(conn, export, export.name, class_period=1)
+    assert result.class_period == 1
+    assert result.students_touched == 1
+    assert result.records_upserted == 1
+    assert _record_code(conn, "Pat", "2025-09-02", 1) == "Excused Absence"
+    assert _record_code(conn, "Pat", "2025-09-02", 3) is None
+    member = conn.execute(
+        """
+        SELECT period, active
+        FROM student_class_periods scp
+        JOIN students s ON s.id = scp.student_id
+        WHERE s.sis_number = '114007'
+        """
+    ).fetchall()
+    assert [(r["period"], r["active"]) for r in member] == [(1, 1)]
+
+
+def test_other_period_membership_required_to_use_those_absences(
+    tmp_path: Path,
+) -> None:
+    from app.services.attendance_parser import student_has_class_period
+    from app.services.student_lookup import list_eligible_dates_by_sis
+
+    conn = _memory_db()
+    period1 = tmp_path / "p1.txt"
+    _write_fixture(
+        period1,
+        [_base_row(name="Pat", sis="114007", period3="Appointment")],
+    )
+    ingest_attendance_file(conn, period1, period1.name, class_period=1)
+
+    student_id = int(
+        conn.execute(
+            "SELECT id FROM students WHERE sis_number = '114007'"
+        ).fetchone()["id"]
+    )
+    conn.execute(
+        """
+        INSERT INTO attendance_records (
+            student_id, absence_date, period, absence_code
+        ) VALUES (?, '2025-09-02', 3, 'Appointment')
+        """,
+        (student_id,),
+    )
+    conn.commit()
+
+    assert student_has_class_period(conn, student_id, 1) is True
+    assert student_has_class_period(conn, student_id, 3) is False
+    student, dates = list_eligible_dates_by_sis(conn, 3, "114007")
+    assert student is not None
+    assert dates == []
+
+
+def test_leaving_class_deactivates_roster_but_keeps_history(tmp_path: Path) -> None:
+    conn = _memory_db()
+    first = tmp_path / "with_pat.txt"
+    _write_fixture(
+        first,
+        [
+            _base_row(name="Pat", sis="114007", period3="Illness"),
+            _base_row(name="Sam", sis="2002", period3="Illness"),
+        ],
+    )
+    ingest_attendance_file(conn, first, first.name, class_period=3)
+
+    second = tmp_path / "without_pat.txt"
+    _write_fixture(
+        second,
+        [_base_row(name="Sam", sis="2002", period3="Illness")],
+    )
+    result = ingest_attendance_file(conn, second, second.name, class_period=3)
+    assert result.roster_removed == 1
+    assert _record_code(conn, "Pat", "2025-09-02", 3) == "Illness"
+    row = conn.execute(
+        """
+        SELECT scp.active
+        FROM student_class_periods scp
+        JOIN students s ON s.id = scp.student_id
+        WHERE s.sis_number = '114007' AND scp.period = 3
+        """
+    ).fetchone()
+    assert row["active"] == 0
+    from app.services.attendance_parser import student_has_class_period
+
+    pat_id = conn.execute(
+        "SELECT id FROM students WHERE sis_number = '114007'"
+    ).fetchone()["id"]
+    assert student_has_class_period(conn, pat_id, 3) is True
 
 
 def test_names_may_collide_in_schema() -> None:

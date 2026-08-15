@@ -68,6 +68,13 @@ def queue_env(
         """,
         (student_id,),
     )
+    conn.execute(
+        """
+        INSERT INTO student_class_periods (student_id, period, active)
+        VALUES (?, 0, 1)
+        """,
+        (student_id,),
+    )
     conn.commit()
     yield conn, test_settings
     conn.close()
@@ -169,6 +176,13 @@ def test_print_batch_skips_missing_pdf_and_prints_the_rest(
         INSERT INTO attendance_records (
             student_id, absence_date, period, absence_code
         ) VALUES (?, '2025-09-29', 0, 'Family Emergency')
+        """,
+        (other_id,),
+    )
+    conn.execute(
+        """
+        INSERT INTO student_class_periods (student_id, period, active)
+        VALUES (?, 0, 1)
         """,
         (other_id,),
     )

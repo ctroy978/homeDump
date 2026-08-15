@@ -9,22 +9,22 @@
   <h2>Upload Attendance</h2>
   <p>
     Upload a year-to-date attendance export for <strong>one class at a time</strong>
-    (<strong>.txt</strong> or <strong>.xlsx</strong>). The file must include
-    <strong>Student Name</strong>, <strong>Sis Number</strong>, and
-    <strong>Period 0</strong> through <strong>Period 7</strong> columns.
+    (<strong>.txt</strong> or <strong>.xlsx</strong>). Tell the app
+    <strong>which period this class is</strong>. Only that period’s absence
+    column is imported — other periods in the file are ignored.
   </p>
   <p class="help-text">
-    Each student is identified by <strong>student ID (SIS number)</strong> only —
-    display names may be shared. Students without a SIS are skipped and listed below
-    so you can fix their ID and re-upload. Students not in the file are left unchanged.
-    If a student moves from Period 3 to Period 5, upload the export from their
-    <strong>new</strong> class to pick up schedule changes and late notes.
+    Each student is identified by <strong>student ID (SIS number)</strong> only.
+    Students in this file are recorded as having you that period. Students who
+    leave the class stay in the database so they can still request makeup for
+    days they missed while enrolled. If a student moves to another of your
+    periods, upload that class export and tag the new period.
   </p>
 
   {% if import_result %}
   {% if import_result.outcome == "success" %}
   <p class="status-note success">
-    Upload complete —
+    Upload complete for period {{ import_result.class_period }} —
     {{ import_result.records_upserted }} absence record(s) saved for
     {{ import_result.students_touched }} student(s).
     {% if import_result.records_cleared %}
@@ -37,7 +37,7 @@
   </p>
   {% elif import_result.outcome == "partial" %}
   <p class="status-note">
-    Partial import —
+    Partial import for period {{ import_result.class_period }} —
     {{ import_result.records_upserted }} absence record(s) saved for
     {{ import_result.students_touched }} student(s).
     {{ import_result.students_rejected }} student(s) were not imported.
@@ -109,6 +109,17 @@
   {% endif %}
 
   <form class="upload-form" action="/admin/attendance/upload" method="post" enctype="multipart/form-data">
+    <label for="class_period">This export is for class period</label>
+    <select id="class_period" name="class_period" required>
+      <option value="" {% if selected_period is none %}selected{% endif %} disabled>
+        Choose period…
+      </option>
+      {% for p in periods %}
+      <option value="{{ p }}" {% if selected_period == p %}selected{% endif %}>
+        Period {{ p }}
+      </option>
+      {% endfor %}
+    </select>
     <label for="file">Attendance export file</label>
     <input id="file" name="file" type="file" accept=".txt,.tsv,.csv,.xlsx,.xlsm" required>
     <button type="submit">Upload and import</button>
@@ -138,6 +149,7 @@
         <th>ID</th>
         <th>Filename</th>
         <th>Uploaded</th>
+        <th>Class period</th>
         <th>Source rows</th>
       </tr>
     </thead>
@@ -147,6 +159,7 @@
         <td>{{ upload.id }}</td>
         <td>{{ upload.filename }}</td>
         <td>{{ upload.uploaded_at }}</td>
+        <td>{% if upload.class_period is not none %}{{ upload.class_period }}{% else %}—{% endif %}</td>
         <td>{{ upload.row_count }}</td>
       </tr>
       {% endfor %}

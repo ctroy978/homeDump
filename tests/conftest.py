@@ -46,6 +46,15 @@ def db_conn() -> sqlite3.Connection:
             (student_id, absence_date, period, code),
         )
 
+    for period in sorted({item[1] for item in records}):
+        conn.execute(
+            """
+            INSERT INTO student_class_periods (student_id, period, active)
+            VALUES (?, ?, 1)
+            """,
+            (student_id, period),
+        )
+
     conn.commit()
     yield conn
     conn.close()
@@ -83,6 +92,6 @@ def fixture_db_path(tmp_path: Path) -> Path | None:
 
     from app.services.attendance_parser import ingest_attendance_file
 
-    ingest_attendance_file(conn, fixture, fixture.name)
+    ingest_attendance_file(conn, fixture, fixture.name, class_period=3)
     conn.close()
     return db_path
