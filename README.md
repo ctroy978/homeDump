@@ -344,6 +344,9 @@ entering `SCAN_PIN`.
 1. Open **GitHub worksheets** (`/admin/distribute/prep`).
 2. Pick a repo, search PDFs, and download a print packet.
 3. Print the packet — the cover QR encodes repo + path only (not periods).
+4. Optionally **Print with names** for a period roster: one collated PDF with
+   the install QR cover, each student’s name in the worksheet `Student Name:`
+   field, and one unlabeled extra copy at the end.
 
 **Scan (distribution day):**
 

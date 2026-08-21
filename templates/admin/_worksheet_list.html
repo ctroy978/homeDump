@@ -87,10 +87,16 @@
             data-title="{{ worksheet.display_title }}"
           >Use this PDF</button>
           {% else %}
-          <a
-            class="download-button"
-            href="/admin/distribute/prep/print-packet?repo={{ repo | urlencode }}&amp;path={{ worksheet.path | urlencode }}"
-          >Prepare print packet</a>
+          <div class="worksheet-actions">
+            <a
+              class="download-button"
+              href="/admin/distribute/prep/print-packet?repo={{ repo | urlencode }}&amp;path={{ worksheet.path | urlencode }}"
+            >Prepare print packet</a>
+            <a
+              class="download-button secondary"
+              href="/admin/distribute/prep/named-copies?repo={{ repo | urlencode }}&amp;path={{ worksheet.path | urlencode }}"
+            >Print with names</a>
+          </div>
           {% endif %}
         </td>
       </tr>

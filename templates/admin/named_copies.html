@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block head %}
+<script src="/static/htmx.min.js"></script>
+{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Print with student names</h2>
+  <p>
+    Download one collated PDF for <strong>{{ display_title }}</strong>: the
+    install QR cover sheet, a named copy for each selected student, then one
+    unlabeled extra.
+  </p>
+  <p class="assignment-meta">{{ repo }} / {{ path }}</p>
+  <p class="help-text">
+    Names are written in the worksheet’s <code>Student Name:</code> field.
+    Student ID, date, and period are left blank.
+  </p>
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+
+  <form
+    class="upload-form"
+    action="/admin/distribute/prep/named-copies"
+    method="post"
+  >
+    <input type="hidden" name="repo" value="{{ repo }}">
+    <input type="hidden" name="path" value="{{ path }}">
+
+    <label for="named-period">Class period</label>
+    <select
+      id="named-period"
+      name="period"
+      hx-get="/admin/distribute/prep/named-copies/roster"
+      hx-target="#named-roster"
+      hx-trigger="change"
+    >
+      {% for item in periods %}
+      <option value="{{ item }}" {% if item == period %}selected{% endif %}>
+        Period {{ item }} ({{ period_counts[item] }} student{% if period_counts[item] != 1 %}s{% endif %})
+      </option>
+      {% endfor %}
+    </select>
+
+    <div id="named-roster">
+      {% include "admin/_named_roster.html" %}
+    </div>
+
+    <button type="submit" class="download-button">Download named copies</button>
+    <p class="help-text">
+      <a href="/admin/distribute/prep?repo={{ repo | urlencode }}">Back to GitHub worksheets</a>
+    </p>
+  </form>
+</section>
+<script>
+  document.body.addEventListener("click", (event) => {
+    const toggle = event.target.closest(".roster-toggle");
+    if (!toggle) {
+      return;
+    }
+    const checked = toggle.dataset.checked === "true";
+    document.querySelectorAll("#named-roster input[name='student_ids']").forEach((input) => {
+      input.checked = checked;
+    });
+  });
+</script>
+{% endblock %}

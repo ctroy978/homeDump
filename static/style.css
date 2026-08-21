@@ -116,6 +116,25 @@ main {
   cursor: pointer;
 }
 
+.upload-form select {
+  font: inherit;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.upload-form .roster-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  width: auto;
+  border-radius: 0;
+}
+
 .help-text {
   color: var(--muted);
   font-size: 0.95rem;
@@ -435,7 +454,7 @@ main {
 .repo-browser-meta {
   color: var(--muted);
   font-size: 0.9rem;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .badge-failed {
@@ -514,6 +533,47 @@ main {
   font: inherit;
   text-decoration: none;
   cursor: pointer;
+}
+
+.download-button.secondary {
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.worksheet-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.worksheet-actions .download-button {
+  margin-top: 0;
+}
+
+.named-roster {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.roster-toggle-row {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0.25rem 0 0.5rem;
+}
+
+.roster-toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .claim-result {

@@ -161,6 +161,7 @@ def test_github_browse_returns_selection_partial(
     assert captured == [(REPO, "", "test")]
     assert "Use this PDF" in response.text
     assert "Prepare print packet" not in response.text
+    assert "Print with names" not in response.text
     assert "<html" not in response.text.lower()
 
 

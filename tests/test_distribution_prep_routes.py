@@ -137,6 +137,7 @@ def test_prep_page_lists_worksheets(
     assert REPO in response.text
     assert "unit2" in response.text
     assert "Prepare print packet" in response.text
+    assert "Print with names" in response.text
 
 
 def test_prep_browse_partial(
@@ -265,3 +266,133 @@ def test_print_packet_download(
 
     reader = PdfReader(BytesIO(response.content))
     assert len(reader.pages) == 2
+
+
+def _grader_header_pdf(page_count: int = 2) -> bytes:
+    document = fitz.open()
+    try:
+        for index in range(page_count):
+            page = document.new_page(width=612, height=792)
+            page.insert_text((43.2, 68.5), "Student Name:", fontsize=10, fontname="helv")
+            page.insert_text((43.2, 83.3), "Student ID:", fontsize=10, fontname="helv")
+            page.insert_text(
+                (72, 200),
+                f"Question body {index + 1}",
+                fontsize=12,
+                fontname="helv",
+            )
+        return document.tobytes()
+    finally:
+        document.close()
+
+
+def _period_one_student_id(db_conn) -> int:
+    row = db_conn.execute(
+        """
+        SELECT s.id
+        FROM students s
+        JOIN student_class_periods scp ON scp.student_id = s.id
+        WHERE scp.period = 1 AND scp.active = 1
+        """
+    ).fetchone()
+    assert row is not None
+    return int(row["id"])
+
+
+def test_named_copies_requires_admin_login(
+    client: TestClient, github_settings: None
+) -> None:
+    response = client.get(
+        f"/admin/distribute/prep/named-copies?repo={REPO}&path={PATH}",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/admin/login")
+
+
+def test_named_copies_page_lists_period_one_roster(
+    admin_client: TestClient,
+) -> None:
+    response = admin_client.get(
+        f"/admin/distribute/prep/named-copies?repo={REPO}&path={PATH}"
+    )
+    assert response.status_code == 200
+    assert 'src="/static/htmx.min.js"' in response.text
+    assert "unpkg.com/htmx" not in response.text
+    assert "Print with student names" in response.text
+    assert "Test Student A" in response.text
+    assert "Period 1" in response.text
+    assert "Download named copies" in response.text
+    assert "install QR cover" in response.text
+
+
+def test_named_copies_roster_partial(
+    admin_client: TestClient,
+) -> None:
+    response = admin_client.get(
+        "/admin/distribute/prep/named-copies/roster?period=1"
+    )
+    assert response.status_code == 200
+    assert "Test Student A" in response.text
+    assert "<html" not in response.text.lower()
+
+
+def test_named_copies_download(
+    admin_client: TestClient,
+    db_conn,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    student_id = _period_one_student_id(db_conn)
+    monkeypatch.setattr(
+        distribution_router,
+        "fetch_pdf_bytes",
+        lambda repo, path, **kwargs: _grader_header_pdf(page_count=2),
+    )
+    monkeypatch.setattr(
+        distribution_router,
+        "build_distribute_url",
+        lambda request, repo, path: (
+            "http://homework.local:8000/admin/distribute?"
+            f"repo={repo}&path=unit2%2Fch04.pdf"
+        ),
+    )
+
+    response = admin_client.post(
+        "/admin/distribute/prep/named-copies",
+        data={
+            "repo": REPO,
+            "path": PATH,
+            "period": "1",
+            "student_ids": str(student_id),
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    disposition = response.headers.get("content-disposition", "")
+    assert "attachment" in disposition
+    assert "period-1-named.pdf" in disposition
+
+    document = fitz.open(stream=response.content, filetype="pdf")
+    try:
+        assert document.page_count == 5
+        cover = document[0].get_text()
+        assert "Install QR" in cover
+        assert "Test Student A" not in cover
+        assert "Test Student A" in document[1].get_text()
+        assert "Test Student A" in document[2].get_text()
+        assert "Test Student A" not in document[3].get_text()
+        assert "Student Name:" in document[3].get_text()
+    finally:
+        document.close()
+
+
+def test_named_copies_requires_a_student(
+    admin_client: TestClient,
+) -> None:
+    response = admin_client.post(
+        "/admin/distribute/prep/named-copies",
+        data={"repo": REPO, "path": PATH, "period": "1"},
+    )
+    assert response.status_code == 400
+    assert "at least one student" in response.text

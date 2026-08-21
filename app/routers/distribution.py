@@ -14,11 +14,13 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import is_scan_authenticated, pin_matches, require_admin, set_scan_cookie
 from app.public_url import PublicUrlError
+from app.services.attendance_parser import validate_class_period
 from app.services.distribution import register_distribution
 from app.services.distribution_log import DistributionOutcome, list_distribution_events
 from app.services.distribution_packet import (
     DistributionPacketError,
     build_distribute_url,
+    build_named_class_packet_pdf,
     build_print_packet_pdf,
 )
 from app.services.github_worksheets import (
@@ -28,6 +30,11 @@ from app.services.github_worksheets import (
     fetch_pdf_bytes,
     list_filtered_repos,
     validate_worksheet_locator,
+)
+from app.services.student_roster import (
+    list_active_period_counts,
+    list_active_roster,
+    resolve_selected_roster,
 )
 
 router = APIRouter(prefix="/admin", tags=["distribution"])
@@ -84,6 +91,40 @@ def _safe_packet_filename(path: str) -> str:
     stem = display_title_from_path(path)
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-") or "worksheet"
     return f"{slug}-print-packet.pdf"
+
+
+def _safe_named_filename(path: str, period: int) -> str:
+    stem = display_title_from_path(path)
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-") or "worksheet"
+    return f"{slug}-period-{period}-named.pdf"
+
+
+def _parse_period(value: object, default: int = 1) -> int:
+    try:
+        return validate_class_period(int(str(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _named_copies_context(
+    *,
+    repo: str,
+    path: str,
+    period: int,
+    db,
+    error: str | None = None,
+) -> dict[str, object]:
+    return {
+        "title": "Print with student names",
+        "repo": repo,
+        "path": path,
+        "display_title": display_title_from_path(path),
+        "period": period,
+        "periods": ALL_PERIODS,
+        "period_counts": list_active_period_counts(db),
+        "roster": list_active_roster(db, period),
+        "error": error,
+    }
 
 
 @router.get("/distribute/prep", response_class=HTMLResponse)
@@ -205,6 +246,149 @@ def distribute_print_packet(
         )
 
     filename = _safe_packet_filename(path)
+    return Response(
+        content=packet_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/distribute/prep/named-copies", response_class=HTMLResponse)
+def named_copies_page(
+    request: Request,
+    repo: str = Query(..., min_length=1),
+    path: str = Query(..., min_length=1),
+    period: int | None = Query(default=None),
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> HTMLResponse:
+    """Choose a period roster and download named worksheet copies."""
+    if not settings.github_enabled:
+        return RedirectResponse(
+            url="/admin?prep_error=github_disabled",
+            status_code=303,
+        )
+
+    try:
+        validate_worksheet_locator(repo, path)
+        selected_period = (
+            validate_class_period(period) if period is not None else 1
+        )
+    except ValueError as exc:
+        message = quote(str(exc))
+        return RedirectResponse(
+            url=(
+                f"/admin/distribute/prep?repo={quote(repo)}"
+                f"&error=packet&message={message}"
+            ),
+            status_code=303,
+        )
+
+    error_message = None
+    if request.query_params.get("error") == "named":
+        error_message = request.query_params.get(
+            "message", "Could not build named copies."
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/named_copies.html",
+        context=_named_copies_context(
+            repo=repo,
+            path=path,
+            period=selected_period,
+            db=db,
+            error=error_message,
+        ),
+    )
+
+
+@router.get("/distribute/prep/named-copies/roster", response_class=HTMLResponse)
+def named_copies_roster(
+    request: Request,
+    period: int = Query(...),
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: active students for the selected period."""
+    try:
+        selected_period = validate_class_period(period)
+    except ValueError as exc:
+        return HTMLResponse(
+            f"<p class='status-note error'>{escape(str(exc))}</p>",
+            status_code=400,
+        )
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/_named_roster.html",
+        context={
+            "period": selected_period,
+            "roster": list_active_roster(db, selected_period),
+        },
+    )
+
+
+@router.post("/distribute/prep/named-copies", response_model=None)
+async def named_copies_download(
+    request: Request,
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+):
+    """Download cover plus collated named copies and one unlabeled extra."""
+    if not settings.github_enabled:
+        return RedirectResponse(
+            url="/admin?prep_error=github_disabled",
+            status_code=303,
+        )
+
+    form = await request.form()
+    repo = str(form.get("repo") or "")
+    path = str(form.get("path") or "")
+    period_value = form.get("period")
+    raw_ids = form.getlist("student_ids")
+
+    def _form_error(message: str, period: int = 1) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/named_copies.html",
+            context=_named_copies_context(
+                repo=repo,
+                path=path,
+                period=period,
+                db=db,
+                error=message,
+            ),
+            status_code=400,
+        )
+
+    try:
+        validate_worksheet_locator(repo, path)
+        selected_period = validate_class_period(int(str(period_value)))
+        student_ids = [int(str(value)) for value in raw_ids]
+        roster = resolve_selected_roster(db, selected_period, student_ids)
+        worksheet_pdf = fetch_pdf_bytes(repo, path)
+        packet_bytes = build_named_class_packet_pdf(
+            worksheet_pdf_bytes=worksheet_pdf,
+            student_names=[student.name for student in roster],
+            display_title=display_title_from_path(path),
+            distribute_url=build_distribute_url(request, repo, path),
+            github_repo=repo,
+            github_path=path,
+        )
+    except ValueError as exc:
+        return _form_error(str(exc), _parse_period(period_value))
+    except (GitHubWorksheetError, DistributionPacketError, PublicUrlError) as exc:
+        message = quote(str(exc))
+        return RedirectResponse(
+            url=(
+                f"/admin/distribute/prep/named-copies?repo={quote(repo)}"
+                f"&path={quote(path)}&period={_parse_period(period_value)}"
+                f"&error=named&message={message}"
+            ),
+            status_code=303,
+        )
+
+    filename = _safe_named_filename(path, selected_period)
     return Response(
         content=packet_bytes,
         media_type="application/pdf",
