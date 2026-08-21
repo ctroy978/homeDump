@@ -1,22 +1,24 @@
-"""Generate traceable makeup homework claims with watermarked PDFs."""
+"""Generate traceable makeup homework claims with named PDFs."""
 
 from __future__ import annotations
 
 import secrets
 import sqlite3
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 
 import fitz
-from PIL import Image, ImageDraw
-from pypdf import PdfReader, PdfWriter
 
 from app.config import settings
 from app.services.assignments import get_assignment_pdf_path
 from app.services.eligibility import check_eligibility
 from app.services.attendance_parser import student_has_class_period
 from app.services.student_lookup import LOOKUP_FAILURE_MESSAGE, get_student_by_sis
+from app.services.worksheet_name import (
+    WorksheetNameError,
+    assert_student_name_fields,
+    stamp_student_name,
+)
 
 
 class ClaimError(Exception):
@@ -183,84 +185,31 @@ def log_claim(
     conn.commit()
 
 
-def _watermark_lines(
-    student_name: str,
-    token: str,
-    period: int,
-    absence_date: str,
-    assignment_title: str,
-) -> list[str]:
-    return [
-        "Makeup Homework",
-        student_name,
-        f"Code: {token}",
-        f"Period {period} · {absence_date}",
-        assignment_title,
-    ]
-
-
-def _build_watermark_page(width: float, height: float, lines: list[str]) -> bytes:
-    img = Image.new("RGBA", (int(width), int(height)), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(img)
-    y = height * 0.3
-    for line in lines:
-        draw.text((width * 0.08, y), line, fill=(90, 90, 90, 150))
-        y += 28
-    img = img.rotate(45, expand=False)
-    buffer = BytesIO()
-    img.save(buffer, "PDF", resolution=72.0)
-    return buffer.getvalue()
-
-
-def _flatten_pdf_for_printing(pdf_bytes: bytes, *, dpi: int = 200) -> bytes:
-    """
-    Rasterize each page so worksheet and watermark print as one layer.
-
-    Physical printers often skip underlying PDF content when transparent overlays
-    are merged on top. Flattening composites everything into a single opaque page.
-    """
-    source = fitz.open(stream=pdf_bytes, filetype="pdf")
-    flattened = fitz.open()
-    try:
-        for page in source:
-            pixmap = page.get_pixmap(dpi=dpi, alpha=False)
-            new_page = flattened.new_page(
-                width=page.rect.width,
-                height=page.rect.height,
-            )
-            new_page.insert_image(new_page.rect, pixmap=pixmap)
-        return flattened.tobytes()
-    finally:
-        source.close()
-        flattened.close()
-
-
-def watermark_pdf(
+def prepare_named_claim_pdf(
     source: Path,
     destination: Path,
-    lines: list[str],
+    student_name: str,
 ) -> None:
-    """Overlay traceability text on every page."""
+    """Copy the assignment PDF and stamp the student name in the header."""
     if not source.exists():
         raise ClaimError("Original assignment PDF is missing.")
 
-    reader = PdfReader(str(source))
-    writer = PdfWriter()
-    for page in reader.pages:
-        width = float(page.mediabox.width)
-        height = float(page.mediabox.height)
-        watermark_page = PdfReader(
-            BytesIO(_build_watermark_page(width, height, lines))
-        ).pages[0]
-        page.merge_page(watermark_page)
-        writer.add_page(page)
-
-    buffer = BytesIO()
-    writer.write(buffer)
-
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("wb") as handle:
-        handle.write(_flatten_pdf_for_printing(buffer.getvalue()))
+    document = fitz.open(source)
+    try:
+        if document.page_count == 0:
+            raise ClaimError("Original assignment PDF has no pages.")
+        try:
+            assert_student_name_fields(document)
+            for page in document:
+                stamp_student_name(page, student_name)
+        except WorksheetNameError as exc:
+            raise ClaimError(
+                "Could not prepare this homework for printing. Ask your teacher."
+            ) from exc
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(document.tobytes())
+    finally:
+        document.close()
 
 
 def claim_pdf_path(token: str) -> Path:
@@ -279,7 +228,7 @@ def process_claim(
     user_agent: str | None = None,
 ) -> ClaimResult:
     """
-    Validate eligibility, issue a unique token, and prepare a watermarked PDF.
+    Validate eligibility, issue a unique token, and prepare a named PDF.
 
     Re-requests for the same student/assignment/date return the existing token.
     """
@@ -358,20 +307,12 @@ def process_claim(
         absence_date=date,
     )
 
-    lines = _watermark_lines(
-        name,
-        token,
-        period,
-        date,
-        str(assignment["title"]),
-    )
-
     pdf_destination = claim_pdf_path(token)
     try:
-        watermark_pdf(
+        prepare_named_claim_pdf(
             get_assignment_pdf_path(assignment_id),
             pdf_destination,
-            lines,
+            name,
         )
     except ClaimError:
         raise

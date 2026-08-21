@@ -1,4 +1,4 @@
-"""Tests for the claim flow, watermarking, and verification."""
+"""Tests for the claim flow, named PDFs, and verification."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import types
 from io import BytesIO
 from pathlib import Path
 
+import fitz
 import pytest
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfWriter
 
 from app import config
 from app.database import init_schema
@@ -81,37 +82,54 @@ def _blank_pdf_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def _seed_assignment(conn: sqlite3.Connection, test_settings: types.SimpleNamespace) -> int:
+def _grader_header_pdf(page_count: int = 1) -> bytes:
+    document = fitz.open()
+    try:
+        for index in range(page_count):
+            page = document.new_page(width=612, height=792)
+            page.insert_text((43.2, 68.5), "Student Name:", fontsize=10, fontname="helv")
+            page.insert_text((43.2, 83.3), "Student ID:", fontsize=10, fontname="helv")
+            page.insert_text(
+                (43.2, 98.0),
+                f"Assignment ID: TEST  Page {index + 1}",
+                fontsize=10,
+                fontname="helv",
+            )
+            page.insert_text(
+                (72, 200),
+                f"Question body {index + 1}",
+                fontsize=12,
+                fontname="helv",
+            )
+        return document.tobytes()
+    finally:
+        document.close()
+
+
+def _seed_assignment(
+    conn: sqlite3.Connection,
+    test_settings: types.SimpleNamespace,
+    *,
+    pdf_bytes: bytes | None = None,
+) -> int:
     return create_assignment(
         conn,
         periods=[0],
         assigned_date="2025-09-29",
         title="Week 1 packet",
         description=None,
-        pdf_bytes=_blank_pdf_bytes(),
+        pdf_bytes=pdf_bytes if pdf_bytes is not None else _grader_header_pdf(),
         original_filename="week1.pdf",
     )
 
 
-def _page_image_has_transparency(page: object) -> bool:
-    resources = page.get("/Resources")
-    if resources is None:
-        return False
-    xobjects = resources.get("/XObject")
-    if xobjects is None:
-        return False
-    for xobject in xobjects.values():
-        image = xobject.get_object()
-        if image.get("/SMaskInData") or image.get("/SMask"):
-            return True
-    return False
-
-
-def test_watermarked_pdf_is_flattened_for_printing(
+def test_claim_pdf_stamps_name_in_header_and_has_no_watermark(
     claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
 ) -> None:
     conn, test_settings = claim_env
-    assignment_id = _seed_assignment(conn, test_settings)
+    assignment_id = _seed_assignment(
+        conn, test_settings, pdf_bytes=_grader_header_pdf(page_count=2)
+    )
 
     result = process_claim(
         conn,
@@ -122,10 +140,45 @@ def test_watermarked_pdf_is_flattened_for_printing(
         public_base_url="http://classroom.test:8000",
     )
 
-    reader = PdfReader(str(claim_pdf_path(result.token)))
-    assert len(reader.pages) >= 1
-    for page in reader.pages:
-        assert not _page_image_has_transparency(page)
+    document = fitz.open(claim_pdf_path(result.token))
+    try:
+        assert document.page_count == 2
+        for page in document:
+            text = page.get_text()
+            assert "Test Student A" in text
+            assert "Student Name:" in text
+            assert "Makeup Homework" not in text
+            assert "Code:" not in text
+            label = page.search_for("Student Name:")[0]
+            name_hits = page.search_for("Test Student A")
+            assert name_hits
+            name = name_hits[0]
+            assert name.x0 >= label.x1
+            assert name.x1 <= label.x1 + 4 + (1.85 * 72) + 8
+            assert abs(name.y0 - label.y0) < 8
+            id_label = page.search_for("Student ID:")[0]
+            assert name.y1 <= id_label.y0 + 2
+    finally:
+        document.close()
+
+
+def test_process_claim_rejects_pdf_without_name_field(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, test_settings = claim_env
+    assignment_id = _seed_assignment(
+        conn, test_settings, pdf_bytes=_blank_pdf_bytes()
+    )
+
+    with pytest.raises(ClaimError, match="Could not prepare this homework"):
+        process_claim(
+            conn,
+            sis_number="10001",
+            assignment_id=assignment_id,
+            period=0,
+            absence_date="2025-09-29",
+            public_base_url="http://classroom.test:8000",
+        )
 
 
 def test_process_claim_issues_token_and_assets(

@@ -12,18 +12,14 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.errors import PdfReadError
 
 from app.public_url import resolve_public_base_url
+from app.services.worksheet_name import (
+    WorksheetNameError,
+    assert_student_name_fields,
+    stamp_student_name,
+)
 
 COVER_WIDTH = 612.0
 COVER_HEIGHT = 792.0
-STUDENT_NAME_LABEL = "Student Name:"
-NAME_SLOT_WIDTH_PT = 1.85 * 72.0
-NAME_SLOT_GAP_PT = 4.0
-NAME_FONTSIZE = 10.0
-NAME_FONT = "helv"
-MISSING_NAME_FIELD_MESSAGE = (
-    "This PDF does not have the Student Name field the grader expects. "
-    "Named copies only work with OCR worksheets that include that header."
-)
 
 
 class DistributionPacketError(Exception):
@@ -140,36 +136,6 @@ def build_print_packet_pdf(
     return output.getvalue()
 
 
-def _assert_student_name_fields(document: fitz.Document) -> None:
-    for page in document:
-        if not page.search_for(STUDENT_NAME_LABEL):
-            raise DistributionPacketError(MISSING_NAME_FIELD_MESSAGE)
-
-
-def _fontsize_for_name(name: str, max_width: float) -> float:
-    size = NAME_FONTSIZE
-    while size > 7.0:
-        width = fitz.get_text_length(name, fontname=NAME_FONT, fontsize=size)
-        if width <= max_width:
-            return size
-        size -= 0.5
-    return 7.0
-
-
-def _stamp_student_name(page: fitz.Page, student_name: str) -> None:
-    hits = page.search_for(STUDENT_NAME_LABEL)
-    if not hits:
-        raise DistributionPacketError(MISSING_NAME_FIELD_MESSAGE)
-    label = hits[0]
-    # insert_textbox fails in the tight OCR header; draw on the label baseline.
-    page.insert_text(
-        (label.x1 + NAME_SLOT_GAP_PT, label.y1),
-        student_name,
-        fontsize=_fontsize_for_name(student_name, NAME_SLOT_WIDTH_PT),
-        fontname=NAME_FONT,
-    )
-
-
 def build_named_class_packet_pdf(
     *,
     worksheet_pdf_bytes: bytes,
@@ -200,21 +166,23 @@ def build_named_class_packet_pdf(
     try:
         if source.page_count == 0:
             raise DistributionPacketError("The worksheet PDF has no pages.")
-        _assert_student_name_fields(source)
-
-        output = fitz.open()
-        cover = fitz.open(stream=cover_bytes, filetype="pdf")
         try:
-            output.insert_pdf(cover)
-            for name in names:
-                start = output.page_count
+            assert_student_name_fields(source)
+            output = fitz.open()
+            cover = fitz.open(stream=cover_bytes, filetype="pdf")
+            try:
+                output.insert_pdf(cover)
+                for name in names:
+                    start = output.page_count
+                    output.insert_pdf(source)
+                    for offset in range(source.page_count):
+                        stamp_student_name(output[start + offset], name)
                 output.insert_pdf(source)
-                for offset in range(source.page_count):
-                    _stamp_student_name(output[start + offset], name)
-            output.insert_pdf(source)
-            return output.tobytes()
-        finally:
-            cover.close()
-            output.close()
+                return output.tobytes()
+            finally:
+                cover.close()
+                output.close()
+        except WorksheetNameError as exc:
+            raise DistributionPacketError(str(exc)) from exc
     finally:
         source.close()

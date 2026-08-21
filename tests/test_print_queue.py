@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import sqlite3
 import types
-from io import BytesIO
 from pathlib import Path
 
+import fitz
 import pytest
 from fastapi.testclient import TestClient
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader
 
 from app import config
 from app.database import init_schema
@@ -80,12 +80,22 @@ def queue_env(
     conn.close()
 
 
-def _blank_pdf_bytes() -> bytes:
-    writer = PdfWriter()
-    writer.add_blank_page(200, 200)
-    buffer = BytesIO()
-    writer.write(buffer)
-    return buffer.getvalue()
+def _grader_header_pdf(page_count: int = 1) -> bytes:
+    document = fitz.open()
+    try:
+        for index in range(page_count):
+            page = document.new_page(width=612, height=792)
+            page.insert_text((43.2, 68.5), "Student Name:", fontsize=10, fontname="helv")
+            page.insert_text((43.2, 83.3), "Student ID:", fontsize=10, fontname="helv")
+            page.insert_text(
+                (43.2, 98.0),
+                f"Assignment ID: TEST  Page {index + 1}",
+                fontsize=10,
+                fontname="helv",
+            )
+        return document.tobytes()
+    finally:
+        document.close()
 
 
 def _prepare_claim(conn: sqlite3.Connection) -> str:
@@ -95,7 +105,7 @@ def _prepare_claim(conn: sqlite3.Connection) -> str:
         assigned_date="2025-09-29",
         title="Week 1 packet",
         description=None,
-        pdf_bytes=_blank_pdf_bytes(),
+        pdf_bytes=_grader_header_pdf(),
         original_filename="week1.pdf",
     )
     result = process_claim(
@@ -152,8 +162,18 @@ def test_print_batch_marks_printed_and_clears_queue(
     assert list_print_queue(conn) == []
     assert is_already_printed(conn, token) is True
 
-    reader = PdfReader(str(result.batch_path))
-    assert len(reader.pages) >= 1
+    document = fitz.open(result.batch_path)
+    try:
+        assert document.page_count >= 1
+        text = document[0].get_text()
+        assert "Test Student A" in text
+        assert "Student Name:" in text
+        assert "Makeup Homework" not in text
+        label = document[0].search_for("Student Name:")[0]
+        name = document[0].search_for("Test Student A")[0]
+        assert name.x0 >= label.x1
+    finally:
+        document.close()
     result.batch_path.unlink()
 
 
