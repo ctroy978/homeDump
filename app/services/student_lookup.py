@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from app.services.attendance_parser import student_has_class_period
-from app.services.eligibility import check_eligibility, is_allowable_code
+from app.services.eligibility import check_eligibility
 from app.services.sis import find_student_row_by_sis, normalize_sis_number
 
 LOOKUP_FAILURE_MESSAGE = (
@@ -86,13 +86,14 @@ def list_eligible_dates_for_student(
     student_id: int,
 ) -> list[str]:
     """
-    Absence dates where the student qualifies and homework was assigned.
+    Absence dates where the student was absent and homework was assigned.
 
-    Dates are returned newest-first (ISO YYYY-MM-DD sorts correctly).
+    Any recorded absence qualifies, excused or not. Dates are returned
+    newest-first (ISO YYYY-MM-DD sorts correctly).
     """
     rows = conn.execute(
         """
-        SELECT DISTINCT ar.absence_date, ar.absence_code
+        SELECT DISTINCT ar.absence_date
         FROM attendance_records ar
         JOIN assignments a ON a.assigned_date = ar.absence_date
         JOIN assignment_periods ap
@@ -103,16 +104,7 @@ def list_eligible_dates_for_student(
         (period, student_id),
     ).fetchall()
 
-    dates: list[str] = []
-    seen: set[str] = set()
-    for row in rows:
-        absence_date = str(row["absence_date"])
-        if absence_date in seen:
-            continue
-        if is_allowable_code(str(row["absence_code"])):
-            dates.append(absence_date)
-            seen.add(absence_date)
-    return dates
+    return [str(row["absence_date"]) for row in rows]
 
 
 def list_eligible_dates_by_sis(
@@ -272,13 +264,7 @@ def diagnose_claim(
         day = str(row["absence_date"])
         if day in eligible_dates:
             continue
-        code = str(row["absence_code"])
-        if not is_allowable_code(code):
-            blocked.append((day, f"Absence code is not allowable: {code}"))
-        else:
-            blocked.append(
-                (day, "Allowable absence, but no homework is assigned for this date.")
-            )
+        blocked.append((day, "No homework is assigned for this date."))
 
     if date:
         result = check_eligibility(conn, student.id, period, date)
@@ -291,7 +277,7 @@ def diagnose_claim(
             summary = f"{student.name}: {result.reason}"
         elif not assignments:
             summary = (
-                f"{student.name} has an allowable absence on {date}, but no "
+                f"{student.name} has an absence on {date}, but no "
                 "homework is assigned for this period and date."
             )
         else:
@@ -319,17 +305,10 @@ def diagnose_claim(
         summary = (
             f"{student.name} has no attendance records for period {period}."
         )
-    elif any(
-        is_allowable_code(str(row["absence_code"])) for row in rows
-    ):
-        summary = (
-            f"{student.name} has allowable absences in period {period}, "
-            "but no matching homework is uploaded for those dates."
-        )
     else:
         summary = (
-            f"{student.name} has attendance in period {period}, but none of "
-            "the codes qualify for makeup."
+            f"{student.name} has absences in period {period}, "
+            "but no matching homework is uploaded for those dates."
         )
 
     return ClaimDiagnosis(

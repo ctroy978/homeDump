@@ -6,8 +6,6 @@ import re
 import sqlite3
 from dataclasses import dataclass
 
-from app.config import settings
-
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -40,31 +38,16 @@ def normalize_text(value: str) -> str:
 
 
 def normalize_absence_code(value: str) -> str:
-    """Case, spacing, and apostrophe fold used for allowable-code matching."""
+    """Case, spacing, and apostrophe fold used for absence-code matching."""
     text = normalize_text(value)
     return _WHITESPACE_RE.sub(" ", text).casefold()
 
 
-def is_allowable_code(
-    code: str,
-    allowable_codes: tuple[str, ...] | None = None,
-) -> bool:
-    """Return True when an absence code is in the configured allowable list."""
-    codes = allowable_codes if allowable_codes is not None else settings.allowable_codes
-    normalized_code = normalize_absence_code(code)
-    allowable_normalized = {normalize_absence_code(item) for item in codes}
-    return normalized_code in allowable_normalized
-
-
-def summarize_absence_codes(
-    codes: list[str],
-    allowable_codes: tuple[str, ...] | None = None,
-) -> tuple[list[str], list[str]]:
+def unique_absence_codes(codes: list[str]) -> list[str]:
     """
-    Return ``(qualifying, not_qualifying)`` display labels from imported codes.
+    Return unique display labels from imported codes.
 
-    First-seen spelling is kept for the teacher; matching is case/space
-    insensitive.
+    First-seen spelling is kept; matching is case/space insensitive.
     """
     seen: dict[str, str] = {}
     for raw in codes:
@@ -74,12 +57,7 @@ def summarize_absence_codes(
         key = normalize_absence_code(text)
         seen.setdefault(key, text)
 
-    labels = sorted(seen.values(), key=str.casefold)
-    qualifying = [label for label in labels if is_allowable_code(label, allowable_codes)]
-    not_qualifying = [
-        label for label in labels if not is_allowable_code(label, allowable_codes)
-    ]
-    return qualifying, not_qualifying
+    return sorted(seen.values(), key=str.casefold)
 
 
 def check_eligibility(
@@ -89,9 +67,11 @@ def check_eligibility(
     absence_date: str,
 ) -> EligibilityResult:
     """
-    Check whether a student had an allowable absence on a given date and period.
+    Check whether a student had an absence on a given date and period.
 
-    Identity is by student_id (SIS-backed person), not display name.
+    Any recorded absence qualifies for makeup work, whether the SIS code is
+    excused or unexcused. Identity is by student_id (SIS-backed person), not
+    display name.
     """
     date = absence_date.strip()
 
@@ -128,21 +108,11 @@ def check_eligibility(
         )
 
     absence_code = str(row["absence_code"])
-    if is_allowable_code(absence_code):
-        return EligibilityResult(
-            eligible=True,
-            student_name=name,
-            period=period,
-            absence_date=date,
-            absence_code=absence_code,
-            reason="Allowable absence code.",
-        )
-
     return EligibilityResult(
-        eligible=False,
+        eligible=True,
         student_name=name,
         period=period,
         absence_date=date,
         absence_code=absence_code,
-        reason=f"Absence code is not allowable: {absence_code}",
+        reason="Absence record found.",
     )

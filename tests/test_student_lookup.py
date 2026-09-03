@@ -77,7 +77,7 @@ def test_get_student_by_sis(db_conn: sqlite3.Connection) -> None:
     assert get_student_by_sis(db_conn, "12.34") is None
 
 
-def test_list_eligible_dates_by_sis_filters_allowable_codes(
+def test_list_eligible_dates_by_sis_includes_unexcused_absences(
     db_conn: sqlite3.Connection,
 ) -> None:
     _add_assignment(db_conn, periods=[0], assigned_date="2025-09-29", title="Week 1")
@@ -88,11 +88,11 @@ def test_list_eligible_dates_by_sis_filters_allowable_codes(
     assert student is not None
     assert dates == ["2025-10-07", "2025-09-29"]
 
-    missing_student, period_three_dates = list_eligible_dates_by_sis(
+    unexcused_student, period_three_dates = list_eligible_dates_by_sis(
         db_conn, 3, "10001"
     )
-    assert missing_student is not None
-    assert period_three_dates == []
+    assert unexcused_student is not None
+    assert period_three_dates == ["2025-09-02"]
 
 
 def test_list_eligible_dates_for_student(db_conn: sqlite3.Connection) -> None:
@@ -143,19 +143,48 @@ def test_multi_period_assignment_visible_in_each_period(
     assert options[0].title == "Shared reading"
 
 
-def test_list_eligible_assignments_not_eligible(
+def test_list_eligible_dates_requires_absence_on_assignment_day(
     db_conn: sqlite3.Connection,
 ) -> None:
-    _add_assignment(db_conn, periods=[3], assigned_date="2025-09-02", title="Quiz")
+    """An absence on a different day does not unlock that day's homework."""
+    _add_assignment(db_conn, periods=[0], assigned_date="2025-10-15", title="Later")
+
+    student, dates = list_eligible_dates_by_sis(db_conn, 0, "10001")
+    assert student is not None
+    assert dates == []
+
+    _, options = list_eligible_assignments_by_sis(
+        db_conn, 0, "10001", "2025-09-29"
+    )
+    assert options == []
+
+
+def test_list_eligible_assignments_without_absence(
+    db_conn: sqlite3.Connection,
+) -> None:
+    _add_assignment(db_conn, periods=[3], assigned_date="2025-01-01", title="Quiz")
 
     student = get_student_by_sis(db_conn, "10001")
     assert student is not None
     assert (
         list_eligible_assignments_for_student(
-            db_conn, 3, student.id, "2025-09-02"
+            db_conn, 3, student.id, "2025-01-01"
         )
         == []
     )
+
+
+def test_list_eligible_assignments_unexcused_absence(
+    db_conn: sqlite3.Connection,
+) -> None:
+    _add_assignment(db_conn, periods=[3], assigned_date="2025-09-02", title="Quiz")
+
+    student, options = list_eligible_assignments_by_sis(
+        db_conn, 3, "10001", "2025-09-02"
+    )
+    assert student is not None
+    assert len(options) == 1
+    assert options[0].title == "Quiz"
 
 
 def test_diagnose_claim_unknown_sis(db_conn: sqlite3.Connection) -> None:
@@ -164,14 +193,27 @@ def test_diagnose_claim_unknown_sis(db_conn: sqlite3.Connection) -> None:
     assert "attendance database" in result.summary
 
 
-def test_diagnose_claim_unexcused_date(db_conn: sqlite3.Connection) -> None:
+def test_diagnose_claim_unexcused_date_without_assignment(
+    db_conn: sqlite3.Connection,
+) -> None:
     result = diagnose_claim(db_conn, "10001", 3, "2025-09-02")
     assert result.student is not None
-    assert "not allowable" in result.summary
+    assert "no homework is assigned" in result.summary
     assert result.assignments == []
 
 
-def test_diagnose_claim_allowable_without_assignment(
+def test_diagnose_claim_unexcused_date_with_assignment(
+    db_conn: sqlite3.Connection,
+) -> None:
+    _add_assignment(db_conn, periods=[3], assigned_date="2025-09-02", title="Quiz")
+    result = diagnose_claim(db_conn, "10001", 3, "2025-09-02")
+    assert result.student is not None
+    assert "can claim" in result.summary
+    assert len(result.assignments) == 1
+    assert result.eligible_dates == ["2025-09-02"]
+
+
+def test_diagnose_claim_absence_without_assignment(
     db_conn: sqlite3.Connection,
 ) -> None:
     result = diagnose_claim(db_conn, "10001", 0, "2025-09-29")

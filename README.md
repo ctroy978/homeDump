@@ -1,6 +1,6 @@
 # Homework Makeup
 
-A self-contained classroom tool for distributing traceable makeup homework to students who had an allowable absence.
+A self-contained classroom tool for distributing traceable makeup homework to students who were absent.
 
 Students on Chromebooks access the app over the local network. The teacher uploads weekly attendance Excel files and homework PDFs. When a student qualifies, they confirm a request; the teacher prints a batch of watermarked PDFs with traceability codes.
 
@@ -67,7 +67,7 @@ are **per student**, not per class. **Student ID (SIS number) is the only identi
    inactive for that class but keep old absences for leftover makeup.
 
 This lets you upload Period 1, then Period 3, without mixing those rosters.
-Re-upload whenever late excused notes arrive.
+Re-upload whenever attendance codes change.
 
 **Schedule changes (Period 1 → Period 5):** upload the **Period 5** export and
 tag it as period 5. Their period 1 history stays; they are no longer offered
@@ -159,7 +159,7 @@ new period 1 work unless they appear in a later period 1 upload.
 
 1. **Prerequisites** — attendance uploaded (Phase 2) with **Sis Number** in the
    export, and at least one assignment added (Phase 4) for a period/date where a
-   test student has an allowable absence.
+   test student has an absence.
 
 2. **Start the server:**
 
@@ -229,16 +229,12 @@ new period 1 work unless they appear in a later period 1 upload.
 2. **Optional live check** — set `DEBUG=true` in `.env`, restart, then:
 
    ```bash
-   curl "http://localhost:8000/dev/eligibility?student=STUDENT_NAME&period=3&date=2025-09-02"
+   curl "http://localhost:8000/dev/eligibility?sis_number=STUDENT_ID&period=3&date=2025-09-02"
    ```
 
-   Replace `STUDENT_NAME` and the date/period with values from your uploaded attendance data. Use this only on the server — do not paste real student names into chat.
+   Replace `STUDENT_ID` and the date/period with values from your uploaded attendance data. Use this only on the server — do not paste real student IDs into chat.
 
-3. **Customize allowable codes** in `.env`:
-
-   ```
-   ALLOWABLE_ABSENCE_CODES=Excused Absence,Sports-Athletics,Illness,...
-   ```
+   Any recorded absence qualifies for makeup work, whether the SIS code is excused or unexcused.
 
 ## Verify Phase 1
 
@@ -280,7 +276,6 @@ Copy `.env.example` to `.env` and edit as needed:
 | `SECRET_KEY` | Signs admin session cookies |
 | `HOST` / `PORT` | Server bind address |
 | `DATA_DIR` | Where database and uploaded files live |
-| `ALLOWABLE_ABSENCE_CODES` | Comma-separated absence codes that qualify |
 | `DEBUG` | Enable developer-only routes when `true` |
 | `GITHUB_TOKEN` | Read-only token for private `scope_*` worksheet repos (Phase 8) |
 | `GITHUB_OWNER` | GitHub owner for worksheet repos (default `krewten-978`) |

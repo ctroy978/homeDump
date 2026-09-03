@@ -68,7 +68,7 @@
   {% endif %}
 
   {% if diagnosis.blocked_dates %}
-  <h3>Dates that do not qualify</h3>
+  <h3>Dates without matching homework</h3>
   <ul>
     {% for day, reason in diagnosis.blocked_dates %}
     <li>{{ day }} — {{ reason }}</li>

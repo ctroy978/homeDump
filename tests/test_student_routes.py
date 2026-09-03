@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
+import sqlite3
+
 import pytest
 from fastapi.testclient import TestClient
 
+import app.services.assignments as assignments_module
+from app.config import settings
 from app.routers import student as student_router
+from app.services.assignments import create_assignment
 from app.services.claims import ClaimError
 from app.services.student_lookup import LOOKUP_FAILURE_MESSAGE
 
@@ -15,6 +22,33 @@ def test_sis_field_does_not_force_numeric_keyboard(client: TestClient) -> None:
     assert response.status_code == 200
     assert 'name="sis_number"' in response.text
     assert "inputmode" not in response.text
+
+
+def test_lookup_includes_unexcused_absence_date(
+    client: TestClient,
+    db_conn: sqlite3.Connection,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    test_settings = replace(settings, data_dir=tmp_path / "data")
+    monkeypatch.setattr(assignments_module, "settings", test_settings)
+    create_assignment(
+        db_conn,
+        periods=[3],
+        assigned_date="2025-09-02",
+        title="Week 0",
+        description=None,
+        pdf_bytes=b"%PDF-1.4 test",
+        original_filename="test.pdf",
+    )
+
+    response = client.post(
+        "/student/lookup",
+        data={"period": "3", "sis_number": "10001"},
+    )
+    assert response.status_code == 200
+    assert "2025-09-02" in response.text
+    assert "matching makeup homework" not in response.text
 
 
 def test_lookup_unknown_sis_returns_html(client: TestClient) -> None:
@@ -74,7 +108,7 @@ def test_confirm_claim_error_stays_html(
     )
 
     def fail_claim(*args, **kwargs):
-        raise ClaimError("Absence code is not allowable: Unexcused Absence")
+        raise ClaimError("No absence record found for this student, period, and date.")
 
     monkeypatch.setattr(student_router, "process_claim", fail_claim)
     response = client.post(
@@ -87,7 +121,7 @@ def test_confirm_claim_error_stays_html(
         },
     )
     assert response.status_code == 200
-    assert "Absence code is not allowable" in response.text
+    assert "No absence record found" in response.text
     assert "Traceback" not in response.text
 
 
@@ -153,7 +187,7 @@ def test_admin_eligibility_requires_login(client: TestClient) -> None:
     assert "/admin/login" in response.headers["location"]
 
 
-def test_admin_eligibility_explains_unexcused(
+def test_admin_eligibility_explains_unexcused_without_homework(
     client: TestClient,
 ) -> None:
     from app.dependencies import ADMIN_COOKIE_NAME, _expected_admin_token
@@ -164,7 +198,8 @@ def test_admin_eligibility_explains_unexcused(
         params={"sis_number": "10001", "period": "3", "date": "2025-09-02"},
     )
     assert response.status_code == 200
-    assert "not allowable" in response.text
+    assert "no homework is assigned" in response.text
+    assert "not allowable" not in response.text
     assert "Students only see a generic message" in response.text
 
 

@@ -14,27 +14,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Load .env from project root if present
 load_dotenv(PROJECT_ROOT / ".env")
 
-# Default absence codes that qualify a student for makeup homework.
-# Override via ALLOWABLE_ABSENCE_CODES in .env (comma-separated).
-DEFAULT_ALLOWABLE_CODES: tuple[str, ...] = (
-    "Excused Absence",
-    "Sports-Athletics",
-    "Illness",
-    "Appointment",
-    "Family Emergency",
-    "Field Trip/School A",
-    "Tardy Excused",
-    "In-School Absence",
-    "Nurse's Office",
-    "School Activity",
-)
-
-
-def _parse_allowable_codes(raw: str | None) -> tuple[str, ...]:
-    if not raw or not raw.strip():
-        return DEFAULT_ALLOWABLE_CODES
-    return tuple(code.strip() for code in raw.split(",") if code.strip())
-
 
 def _parse_public_base_url(raw: str | None) -> str | None:
     """Normalize PUBLIC_BASE_URL from .env (trim whitespace and quotes)."""
@@ -80,11 +59,6 @@ class Settings:
     port: int = field(default_factory=lambda: int(os.getenv("PORT", "8000")))
     debug: bool = field(
         default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true"
-    )
-    allowable_codes: tuple[str, ...] = field(
-        default_factory=lambda: _parse_allowable_codes(
-            os.getenv("ALLOWABLE_ABSENCE_CODES")
-        )
     )
 
     @property

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.services.eligibility import summarize_absence_codes
+from app.services.eligibility import unique_absence_codes
 from app.services.sis import find_student_row_by_sis, normalize_sis_number
 
 EXCEL_EXTENSIONS = {".xlsx", ".xlsm"}
@@ -98,8 +98,7 @@ class AttendanceParseResult:
     rows_skipped: int = 0
     warnings: list[str] = field(default_factory=list)
     rejections: list[StudentImportRejection] = field(default_factory=list)
-    qualifying_codes: list[str] = field(default_factory=list)
-    unrecognized_codes: list[str] = field(default_factory=list)
+    absence_codes: list[str] = field(default_factory=list)
     class_period: int | None = None
     roster_removed: int = 0
 
@@ -853,7 +852,7 @@ def ingest_attendance_file(
             )
 
     result.students_rejected = len(result.rejections)
-    result.qualifying_codes, result.unrecognized_codes = summarize_absence_codes(
+    result.absence_codes = unique_absence_codes(
         [str(row["absence_code"]) for row in parsed_rows]
     )
     try:

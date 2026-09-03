@@ -7,38 +7,50 @@ from pathlib import Path
 
 import pytest
 
-from app.database import init_schema
 from app.services.eligibility import (
     EligibilityResult,
     check_eligibility,
-    is_allowable_code,
     normalize_absence_code,
     normalize_text,
-    summarize_absence_codes,
+    unique_absence_codes,
 )
 
 
 @pytest.mark.parametrize(
-    ("code", "expected"),
+    "code",
     [
-        ("Sports-Athletics", True),
-        ("Illness", True),
-        ("Field Trip/School A", True),
-        ("Family Emergency", True),
-        ("In-School Absence", True),
-        ("Tardy Excused", True),
-        ("Nurse\u2019s Office", True),  # curly apostrophe from real exports
-        ("illness", True),
-        ("EXCUSED ABSENCE", True),
-        ("Excused  Absence", True),
-        ("Unexcused Absence", False),
-        ("Tardy Unexcused", False),
-        ("Early Check Out", False),
-        ("Out-School Suspensio", False),
+        "Sports-Athletics",
+        "Illness",
+        "Field Trip/School A",
+        "Family Emergency",
+        "In-School Absence",
+        "Tardy Excused",
+        "Nurse\u2019s Office",  # curly apostrophe from real exports
+        "illness",
+        "EXCUSED ABSENCE",
+        "Excused  Absence",
+        "Unexcused Absence",
+        "Tardy Unexcused",
+        "Early Check Out",
+        "Out-School Suspensio",
     ],
 )
-def test_is_allowable_code(code: str, expected: bool) -> None:
-    assert is_allowable_code(code) is expected
+def test_any_recorded_absence_code_is_eligible(
+    db_conn: sqlite3.Connection, code: str
+) -> None:
+    student_id = _test_student_id(db_conn)
+    db_conn.execute(
+        """
+        INSERT INTO attendance_records (
+            student_id, absence_date, period, absence_code
+        ) VALUES (?, '2026-01-15', 6, ?)
+        """,
+        (student_id, code),
+    )
+    db_conn.commit()
+    result = check_eligibility(db_conn, student_id, 6, "2026-01-15")
+    assert result.eligible is True
+    assert result.absence_code == code
 
 
 def test_normalize_text_apostrophes() -> None:
@@ -54,12 +66,11 @@ def test_normalize_absence_code_folds_case_and_spaces() -> None:
     )
 
 
-def test_summarize_absence_codes_splits_allowable() -> None:
-    qualifying, unrecognized = summarize_absence_codes(
+def test_unique_absence_codes_dedupes_and_sorts() -> None:
+    codes = unique_absence_codes(
         ["Illness", "illness", "Unexcused Absence", "  Tardy Unexcused "]
     )
-    assert qualifying == ["Illness"]
-    assert unrecognized == ["Tardy Unexcused", "Unexcused Absence"]
+    assert codes == ["Illness", "Tardy Unexcused", "Unexcused Absence"]
 
 
 def _test_student_id(db_conn: sqlite3.Connection) -> int:
@@ -72,28 +83,27 @@ def _test_student_id(db_conn: sqlite3.Connection) -> int:
 
 
 @pytest.mark.parametrize(
-    ("period", "absence_date", "eligible", "code"),
+    ("period", "absence_date", "code"),
     [
-        (0, "2025-09-29", True, "Family Emergency"),
-        (2, "2025-10-15", True, "Sports-Athletics"),
-        (1, "2025-10-20", True, "Illness"),
-        (0, "2025-10-07", True, "Field Trip/School A"),
-        (3, "2025-09-02", False, "Unexcused Absence"),
-        (4, "2025-09-02", False, "Tardy Unexcused"),
+        (0, "2025-09-29", "Family Emergency"),
+        (2, "2025-10-15", "Sports-Athletics"),
+        (1, "2025-10-20", "Illness"),
+        (0, "2025-10-07", "Field Trip/School A"),
+        (3, "2025-09-02", "Unexcused Absence"),
+        (4, "2025-09-02", "Tardy Unexcused"),
     ],
 )
 def test_check_eligibility(
     db_conn: sqlite3.Connection,
     period: int,
     absence_date: str,
-    eligible: bool,
     code: str,
 ) -> None:
     result = check_eligibility(
         db_conn, _test_student_id(db_conn), period, absence_date
     )
     assert isinstance(result, EligibilityResult)
-    assert result.eligible is eligible
+    assert result.eligible is True
     assert result.absence_code == code
     assert result.student_name == "Test Student A"
 
@@ -153,7 +163,7 @@ def test_check_eligibility_same_name_different_sis(
     assert original.absence_code == "Family Emergency"
 
     other = check_eligibility(db_conn, other_id, 0, "2025-09-29")
-    assert other.eligible is False
+    assert other.eligible is True
     assert other.absence_code == "Unexcused Absence"
 
 
@@ -189,5 +199,5 @@ def test_fixture_sparse_period_mapping(fixture_db_path: Path | None) -> None:
     assert student is not None
     result = check_eligibility(conn, int(student["id"]), 3, "2025-09-02")
     conn.close()
-    assert result.eligible is False
+    assert result.eligible is True
     assert result.absence_code == "Unexcused Absence"

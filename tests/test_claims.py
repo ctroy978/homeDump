@@ -211,6 +211,53 @@ def test_process_claim_issues_token_and_assets(
     assert row[0] == 1
 
 
+def test_process_claim_allows_unexcused_absence(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, _test_settings = claim_env
+    student_id = conn.execute(
+        "SELECT id FROM students WHERE sis_number = '10001'"
+    ).fetchone()["id"]
+    conn.execute(
+        """
+        INSERT INTO attendance_records (
+            student_id, absence_date, period, absence_code
+        ) VALUES (?, '2025-09-02', 3, 'Unexcused Absence')
+        """,
+        (student_id,),
+    )
+    conn.execute(
+        """
+        INSERT INTO student_class_periods (student_id, period, active)
+        VALUES (?, 3, 1)
+        """,
+        (student_id,),
+    )
+    conn.commit()
+    assignment_id = create_assignment(
+        conn,
+        periods=[3],
+        assigned_date="2025-09-02",
+        title="Unexcused day packet",
+        description=None,
+        pdf_bytes=_grader_header_pdf(),
+        original_filename="unexcused.pdf",
+    )
+
+    result = process_claim(
+        conn,
+        sis_number="10001",
+        assignment_id=assignment_id,
+        period=3,
+        absence_date="2025-09-02",
+        public_base_url="http://classroom.test:8000",
+    )
+
+    assert result.absence_date == "2025-09-02"
+    assert result.period == 3
+    assert claim_pdf_path(result.token).exists()
+
+
 def test_process_claim_is_idempotent(
     claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
 ) -> None:
@@ -365,6 +412,41 @@ def test_init_schema_dedupes_duplicate_claim_tokens(tmp_path: Path) -> None:
     assert tokens == ["AAAA1111"]
     assert conn.execute("SELECT COUNT(*) FROM print_queue").fetchone()[0] == 0
     conn.close()
+
+
+def test_process_claim_rejects_when_assignment_was_not_given_on_absence_day(
+    claim_env: tuple[sqlite3.Connection, types.SimpleNamespace],
+) -> None:
+    conn, _test_settings = claim_env
+    assignment_id = create_assignment(
+        conn,
+        periods=[0],
+        assigned_date="2025-10-15",
+        title="Later packet",
+        description=None,
+        pdf_bytes=_grader_header_pdf(),
+        original_filename="later.pdf",
+    )
+
+    with pytest.raises(ClaimError, match="does not match the selected absence date"):
+        process_claim(
+            conn,
+            sis_number="10001",
+            assignment_id=assignment_id,
+            period=0,
+            absence_date="2025-09-29",
+            public_base_url="http://classroom.test:8000",
+        )
+
+    with pytest.raises(ClaimError, match="No absence record"):
+        process_claim(
+            conn,
+            sis_number="10001",
+            assignment_id=assignment_id,
+            period=0,
+            absence_date="2025-10-15",
+            public_base_url="http://classroom.test:8000",
+        )
 
 
 def test_process_claim_rejects_ineligible_student(

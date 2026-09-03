@@ -825,7 +825,7 @@ def test_upsert_reuses_leading_zero_equivalent_instead_of_splitting() -> None:
     assert row["grade"] == "11"
 
 
-def test_upload_result_lists_qualifying_and_unrecognized_codes(tmp_path: Path) -> None:
+def test_upload_result_lists_absence_codes(tmp_path: Path) -> None:
     conn = _memory_db()
     export = tmp_path / "codes.txt"
     _write_fixture(
@@ -841,8 +841,8 @@ def test_upload_result_lists_qualifying_and_unrecognized_codes(tmp_path: Path) -
         ],
     )
     result = ingest_attendance_file(conn, export, export.name, class_period=3)
-    assert "illness" in result.qualifying_codes or "Illness" in result.qualifying_codes
-    assert any("Unexcused" in code for code in result.unrecognized_codes)
+    assert "illness" in result.absence_codes or "Illness" in result.absence_codes
+    assert any("Unexcused" in code for code in result.absence_codes)
 
 
 def test_tagged_period_import_ignores_other_period_columns(tmp_path: Path) -> None:

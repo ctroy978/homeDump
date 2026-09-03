@@ -69,25 +69,16 @@
     </ul>
   </div>
   {% endif %}
-  {% if import_result.qualifying_codes or import_result.unrecognized_codes %}
+  {% if import_result.absence_codes %}
   <div class="status-note">
-    {% if import_result.qualifying_codes %}
     <p>
-      <strong>Qualify for makeup:</strong>
-      {{ import_result.qualifying_codes | join(", ") }}
-    </p>
-    {% endif %}
-    {% if import_result.unrecognized_codes %}
-    <p>
-      <strong>Do not qualify:</strong>
-      {{ import_result.unrecognized_codes | join(", ") }}
+      <strong>Absence codes in this file:</strong>
+      {{ import_result.absence_codes | join(", ") }}
     </p>
     <p class="help-text">
-      If an excused reason is listed under “do not qualify”, add that exact
-      label to <code>ALLOWABLE_ABSENCE_CODES</code> in <code>.env</code> and
-      restart the server.
+      Students can request the homework given on a recorded absence date,
+      whether the reason is excused or unexcused.
     </p>
-    {% endif %}
   </div>
   {% endif %}
   {% endif %}
