@@ -905,7 +905,7 @@ def test_other_period_membership_required_to_use_those_absences(
     assert dates == []
 
 
-def test_leaving_class_deactivates_roster_but_keeps_history(tmp_path: Path) -> None:
+def test_leaving_class_keeps_roster_on_absences_only_reupload(tmp_path: Path) -> None:
     conn = _memory_db()
     first = tmp_path / "with_pat.txt"
     _write_fixture(
@@ -923,7 +923,7 @@ def test_leaving_class_deactivates_roster_but_keeps_history(tmp_path: Path) -> N
         [_base_row(name="Sam", sis="2002", period3="Illness")],
     )
     result = ingest_attendance_file(conn, second, second.name, class_period=3)
-    assert result.roster_removed == 1
+    assert result.roster_removed == 0
     assert _record_code(conn, "Pat", "2025-09-02", 3) == "Illness"
     row = conn.execute(
         """
@@ -933,7 +933,7 @@ def test_leaving_class_deactivates_roster_but_keeps_history(tmp_path: Path) -> N
         WHERE s.sis_number = '114007' AND scp.period = 3
         """
     ).fetchone()
-    assert row["active"] == 0
+    assert row["active"] == 1
     from app.services.attendance_parser import student_has_class_period
 
     pat_id = conn.execute(

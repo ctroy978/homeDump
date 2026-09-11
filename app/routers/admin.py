@@ -36,6 +36,11 @@ from app.services.attendance_parser import (
     ingest_attendance_file,
     validate_class_period,
 )
+from app.services.roster_import import (
+    SUPPORTED_ROSTER_EXTENSIONS,
+    ingest_roster_file,
+)
+from app.services.student_roster import list_active_period_counts
 from app.services.claim_logs import ClaimLogStatus, list_claim_logs
 from app.services.data_backup import (
     BackupError,
@@ -100,6 +105,8 @@ def _attendance_page_context(
     error: str | None = None,
     *,
     import_result=None,
+    roster_error: str | None = None,
+    roster_result=None,
 ) -> dict:
     uploads = db.execute(
         """
@@ -109,17 +116,31 @@ def _attendance_page_context(
         LIMIT 10
         """
     ).fetchall()
+    roster_uploads = db.execute(
+        """
+        SELECT id, filename, uploaded_at, row_count, class_period
+        FROM roster_uploads
+        ORDER BY uploaded_at DESC
+        LIMIT 10
+        """
+    ).fetchall()
     last_period = None
-    if uploads and uploads[0]["class_period"] is not None:
+    if roster_uploads and roster_uploads[0]["class_period"] is not None:
+        last_period = int(roster_uploads[0]["class_period"])
+    elif uploads and uploads[0]["class_period"] is not None:
         last_period = int(uploads[0]["class_period"])
     summary = _admin_summary(db)
     context = {
         "title": "Upload Attendance",
         "uploads": uploads,
+        "roster_uploads": roster_uploads,
         "error": error,
         "import_result": import_result,
+        "roster_error": roster_error,
+        "roster_result": roster_result,
         "periods": list(range(8)),
         "selected_period": last_period,
+        "period_counts": list_active_period_counts(db),
         **summary,
     }
     return context
@@ -135,13 +156,23 @@ def _set_admin_cookie(response: RedirectResponse) -> None:
     )
 
 
-def _save_attendance_upload(upload: UploadFile) -> Path:
-    settings.attendance_upload_dir.mkdir(parents=True, exist_ok=True)
+def _save_named_upload(upload: UploadFile, directory: Path, default_name: str) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = Path(upload.filename or "attendance.txt").name
-    destination = settings.attendance_upload_dir / f"{timestamp}_{safe_name}"
+    safe_name = Path(upload.filename or default_name).name
+    destination = directory / f"{timestamp}_{safe_name}"
     destination.write_bytes(upload.file.read())
     return destination
+
+
+def _save_attendance_upload(upload: UploadFile) -> Path:
+    return _save_named_upload(
+        upload, settings.attendance_upload_dir, "attendance.txt"
+    )
+
+
+def _save_roster_upload(upload: UploadFile) -> Path:
+    return _save_named_upload(upload, settings.roster_upload_dir, "roster.csv")
 
 
 def _assignment_form_context(
@@ -392,6 +423,62 @@ async def upload_attendance(
         request=request,
         name="admin/attendance.html",
         context=_attendance_page_context(db, import_result=result),
+    )
+
+
+@router.post("/attendance/roster")
+async def upload_roster(
+    request: Request,
+    file: UploadFile = File(...),
+    class_period: str = Form(""),
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+):
+    filename = file.filename or ""
+    suffix = Path(filename).suffix.lower()
+    if suffix not in SUPPORTED_ROSTER_EXTENSIONS:
+        supported = ", ".join(sorted(SUPPORTED_ROSTER_EXTENSIONS))
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/attendance.html",
+            context=_attendance_page_context(
+                db,
+                roster_error=(
+                    f"Unsupported file type. Please upload one of: {supported}"
+                ),
+            ),
+            status_code=400,
+        )
+
+    try:
+        period = validate_class_period(int(class_period))
+    except (TypeError, ValueError):
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/attendance.html",
+            context=_attendance_page_context(
+                db,
+                roster_error="Choose which class period this roster is for (0–7).",
+            ),
+            status_code=400,
+        )
+
+    saved_path = _save_roster_upload(file)
+
+    try:
+        result = ingest_roster_file(db, saved_path, filename, period)
+    except Exception as exc:  # noqa: BLE001 — teacher-friendly UI message
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/attendance.html",
+            context=_attendance_page_context(db, roster_error=str(exc)),
+            status_code=400,
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/attendance.html",
+        context=_attendance_page_context(db, roster_result=result),
     )
 
 

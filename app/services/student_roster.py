@@ -1,4 +1,4 @@
-"""Active class rosters from period-tagged attendance imports."""
+"""Active class rosters from class-list imports and attendance enrollments."""
 
 from __future__ import annotations
 

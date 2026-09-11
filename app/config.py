@@ -66,6 +66,10 @@ class Settings:
         return self.data_dir / "uploads" / "attendance"
 
     @property
+    def roster_upload_dir(self) -> Path:
+        return self.data_dir / "uploads" / "roster"
+
+    @property
     def assignments_dir(self) -> Path:
         return self.data_dir / "assignments"
 
@@ -104,10 +108,15 @@ class Settings:
         for path in (
             self.data_dir,
             self.attendance_upload_dir,
+            self.roster_upload_dir,
             self.assignments_dir,
             self.claims_dir,
         ):
-            path.mkdir(parents=True, exist_ok=True)
+            try:
+                path.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                # Tests run as the developer user against a www-data data dir.
+                continue
 
 
 def _default_database_path() -> Path:

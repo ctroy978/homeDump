@@ -38,6 +38,14 @@ CREATE TABLE IF NOT EXISTS student_class_periods (
     PRIMARY KEY (student_id, period)
 );
 
+CREATE TABLE IF NOT EXISTS roster_uploads (
+    id INTEGER PRIMARY KEY,
+    filename TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+    row_count INTEGER NOT NULL DEFAULT 0,
+    class_period INTEGER CHECK (class_period IS NULL OR class_period BETWEEN 0 AND 7)
+);
+
 CREATE TABLE IF NOT EXISTS attendance_records (
     id INTEGER PRIMARY KEY,
     student_id INTEGER NOT NULL REFERENCES students(id),
@@ -293,6 +301,20 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
             last_upload_id INTEGER REFERENCES attendance_uploads(id),
             active INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (student_id, period)
+        )
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS roster_uploads (
+            id INTEGER PRIMARY KEY,
+            filename TEXT NOT NULL,
+            uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+            row_count INTEGER NOT NULL DEFAULT 0,
+            class_period INTEGER CHECK (
+                class_period IS NULL OR class_period BETWEEN 0 AND 7
+            )
         )
         """
     )

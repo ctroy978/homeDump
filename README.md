@@ -34,7 +34,7 @@ these URLs for yourself:
 |------|-----|
 | **Admin login** | `http://localhost:8000/admin/login` |
 | Dashboard | `http://localhost:8000/admin` |
-| Upload attendance | `http://localhost:8000/admin/attendance` |
+| Upload class roster and attendance | `http://localhost:8000/admin/attendance` |
 | Assignments | `http://localhost:8000/admin/assignments` |
 | Print queue | `http://localhost:8000/admin/print-queue` |
 | GitHub worksheets (Phase 8) | `http://localhost:8000/admin/distribute/prep` |
@@ -48,30 +48,40 @@ host you set in `PUBLIC_BASE_URL`).
 **Password:** the value of `ADMIN_PASSWORD` in your `.env` file (not shown to
 students). Default in `.env.example` is `changeme` — change it before go-live.
 
-## Attendance import model
+## Class roster and attendance
 
-Exports are year-to-date, but you download them **one class at a time**. Imports
-are **per student**, not per class. **Student ID (SIS number) is the only identity**
+There are two teacher uploads on `/admin/attendance`. Use both.
+
+**Class roster** is the full class list for one period (students who have never
+been absent still need to be enrolled for named worksheets). Upload a CSV with
+columns **Perm ID** and **Student Name** (`Last, First`). Students in that file
+become the **active roster** for the period you tag. Students who disappear from
+a later roster upload of the same period are marked inactive, but keep old
+absences for leftover makeup.
+
+**Attendance export** records makeup-eligible absence dates. Exports are
+year-to-date, but you download them **one class at a time**. Imports are
+**per student**, not per class. **Student ID (SIS number) is the only identity**
 — display names may be shared by two students.
 
-1. The file **must** include a **Sis Number** column (plus Student Name, Date, and
-   Period 0–7).
+1. The attendance file **must** include a **Sis Number** column (plus Student
+   Name, Date, and Period 0–7).
 2. You **must choose which class period this export is** (the class you pulled).
 3. The app finds every student in the file **by SIS number**.
 4. For each student with a valid SIS, it **replaces only that period’s absences**
    from the year-to-date file, then **commits that student** before moving on.
    Other periods are left alone. One bad student does not block the rest.
-5. Students in the file are recorded as **having you that period**. Students
-   **without a SIS** are **rejected** and listed so you can fix the ID.
-6. Students who disappear from a later upload of the same period are marked
-   inactive for that class but keep old absences for leftover makeup.
+5. Students in the attendance file are recorded as **having you that period**.
+   Students **without a SIS** are **rejected** and listed so you can fix the ID.
+6. An attendance upload does **not** drop students who were not absent. Use the
+   class roster upload to set who is currently in the class.
 
 This lets you upload Period 1, then Period 3, without mixing those rosters.
-Re-upload whenever attendance codes change.
+Re-upload attendance whenever absence codes change.
 
-**Schedule changes (Period 1 → Period 5):** upload the **Period 5** export and
-tag it as period 5. Their period 1 history stays; they are no longer offered
-new period 1 work unless they appear in a later period 1 upload.
+**Schedule changes (Period 1 → Period 5):** upload the **Period 5** class roster
+and tag it as period 5. Their period 1 history stays; they are no longer offered
+new period 1 work unless they appear in a later period 1 roster.
 
 ## Verify Phase 2 (attendance upload)
 

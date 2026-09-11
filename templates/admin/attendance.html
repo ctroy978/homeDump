@@ -6,6 +6,82 @@
 {% include "admin/_nav.html" %}
 
 <section class="card">
+  <h2>Upload class roster</h2>
+  <p>
+    Upload the <strong>Perm ID, Student Name</strong> CSV for
+    <strong>one class</strong>. This is the full class list used for named
+    worksheets. Attendance reports only include students who have been absent.
+  </p>
+  <p class="help-text">
+    Choose the period, then upload a CSV with columns named
+    <code>Perm ID</code> and <code>Student Name</code>
+    (<code>Last, First</code>). Students in this file become the active roster
+    for that period. Students who leave the class drop off the next roster
+    upload; their old absences stay for leftover makeup.
+  </p>
+
+  {% if roster_result %}
+  {% if roster_result.outcome == "success" %}
+  <p class="status-note success">
+    Roster loaded for period {{ roster_result.class_period }} —
+    {{ roster_result.students_touched }} student(s) enrolled.
+    {% if roster_result.roster_removed %}
+    Marked {{ roster_result.roster_removed }} previous student(s) inactive
+    for this period.
+    {% endif %}
+  </p>
+  {% elif roster_result.outcome == "partial" %}
+  <p class="status-note">
+    Partial roster import for period {{ roster_result.class_period }} —
+    {{ roster_result.students_touched }} student(s) enrolled.
+    {{ roster_result.students_rejected }} student(s) were not imported.
+  </p>
+  {% else %}
+  <p class="status-note error">
+    Roster upload failed — no students were imported.
+    {% if roster_result.students_rejected %}
+    {{ roster_result.students_rejected }} student(s) need a fix in the file.
+    {% endif %}
+  </p>
+  {% endif %}
+  {% if roster_result.rejections %}
+  <div class="status-note error">
+    <p>
+      <strong>{{ roster_result.students_rejected }}</strong> student(s) were not
+      imported. Fix their row in the roster file and re-upload this class:
+    </p>
+    <ul>
+      {% for item in roster_result.rejections %}
+      <li>{{ item.display() }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% if roster_error %}
+  <p class="status-note error">{{ roster_error }}</p>
+  {% endif %}
+
+  <form class="upload-form" action="/admin/attendance/roster" method="post" enctype="multipart/form-data">
+    <label for="roster_class_period">This roster is for class period</label>
+    <select id="roster_class_period" name="class_period" required>
+      <option value="" {% if selected_period is none %}selected{% endif %} disabled>
+        Choose period…
+      </option>
+      {% for p in periods %}
+      <option value="{{ p }}" {% if selected_period == p %}selected{% endif %}>
+        Period {{ p }}
+      </option>
+      {% endfor %}
+    </select>
+    <label for="roster_file">Class roster CSV</label>
+    <input id="roster_file" name="file" type="file" accept=".csv,.txt,.tsv" required>
+    <button type="submit">Upload class roster</button>
+  </form>
+</section>
+
+<section class="card">
   <h2>Upload Attendance</h2>
   <p>
     Upload a year-to-date attendance export for <strong>one class at a time</strong>
@@ -15,10 +91,11 @@
   </p>
   <p class="help-text">
     Each student is identified by <strong>student ID (SIS number)</strong> only.
-    Students in this file are recorded as having you that period. Students who
-    leave the class stay in the database so they can still request makeup for
-    days they missed while enrolled. If a student moves to another of your
-    periods, upload that class export and tag the new period.
+    Students in this file are recorded as having you that period. An attendance
+    upload does <strong>not</strong> remove students who were not absent —
+    use the class roster upload above to set who is in the class. If a student
+    moves to another of your periods, upload that class roster and tag the
+    new period.
   </p>
 
   {% if import_result %}
@@ -129,6 +206,16 @@
     <li><strong>{{ student_count }}</strong> students</li>
     <li><strong>{{ record_count }}</strong> attendance records</li>
   </ul>
+  {% if period_counts %}
+  <p class="help-text">Active roster by period:</p>
+  <ul>
+    {% for p in periods %}
+    {% if period_counts[p] %}
+    <li>Period {{ p }}: <strong>{{ period_counts[p] }}</strong> student{% if period_counts[p] != 1 %}s{% endif %}</li>
+    {% endif %}
+    {% endfor %}
+  </ul>
+  {% endif %}
 </section>
 
 {% if uploads %}
@@ -146,6 +233,34 @@
     </thead>
     <tbody>
       {% for upload in uploads %}
+      <tr>
+        <td>{{ upload.id }}</td>
+        <td>{{ upload.filename }}</td>
+        <td>{{ upload.uploaded_at }}</td>
+        <td>{% if upload.class_period is not none %}{{ upload.class_period }}{% else %}—{% endif %}</td>
+        <td>{{ upload.row_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% if roster_uploads %}
+<section class="card">
+  <h2>Recent roster uploads</h2>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Filename</th>
+        <th>Uploaded</th>
+        <th>Class period</th>
+        <th>Source rows</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for upload in roster_uploads %}
       <tr>
         <td>{{ upload.id }}</td>
         <td>{{ upload.filename }}</td>

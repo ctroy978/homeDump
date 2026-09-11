@@ -734,26 +734,50 @@ def student_has_class_period(
     return row is not None
 
 
-def _sync_class_period_roster(
+def sync_class_period_roster(
     conn: sqlite3.Connection,
     class_period: int,
     member_ids: set[int],
-    upload_id: int,
+    upload_id: int | None = None,
+    *,
+    deactivate_missing: bool = True,
 ) -> int:
-    """Mark file students active for this period; deactivate missing members."""
+    """
+    Mark file students active for this period.
+
+    Class-list imports pass ``deactivate_missing=True`` so the file is the
+    current roster. Attendance imports pass ``False`` so an absences-only
+    report cannot drop students who have never missed class.
+    """
     for student_id in member_ids:
-        conn.execute(
-            """
-            INSERT INTO student_class_periods (
-                student_id, period, last_upload_id, active
+        if upload_id is None:
+            conn.execute(
+                """
+                INSERT INTO student_class_periods (
+                    student_id, period, last_upload_id, active
+                )
+                VALUES (?, ?, NULL, 1)
+                ON CONFLICT(student_id, period) DO UPDATE SET
+                    active = 1
+                """,
+                (student_id, class_period),
             )
-            VALUES (?, ?, ?, 1)
-            ON CONFLICT(student_id, period) DO UPDATE SET
-                last_upload_id = excluded.last_upload_id,
-                active = 1
-            """,
-            (student_id, class_period, upload_id),
-        )
+        else:
+            conn.execute(
+                """
+                INSERT INTO student_class_periods (
+                    student_id, period, last_upload_id, active
+                )
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT(student_id, period) DO UPDATE SET
+                    last_upload_id = excluded.last_upload_id,
+                    active = 1
+                """,
+                (student_id, class_period, upload_id),
+            )
+
+    if not deactivate_missing:
+        return 0
 
     if member_ids:
         placeholders = ", ".join("?" for _ in member_ids)
@@ -788,7 +812,8 @@ def ingest_attendance_file(
 
     Identity is SIS number only. Each student is committed independently.
     Only ``class_period`` absence cells are imported; other periods are left
-    untouched. Students in the file are marked as members of that period.
+    untouched. Students in the file are marked active for that period.
+    Students missing from an absences-only file are not deactivated.
     """
     class_period = validate_class_period(class_period)
     df = load_attendance_dataframe(source_path)
@@ -856,8 +881,12 @@ def ingest_attendance_file(
         [str(row["absence_code"]) for row in parsed_rows]
     )
     try:
-        result.roster_removed = _sync_class_period_roster(
-            conn, class_period, member_ids, upload_id
+        result.roster_removed = sync_class_period_roster(
+            conn,
+            class_period,
+            member_ids,
+            upload_id,
+            deactivate_missing=False,
         )
         conn.commit()
     except Exception:
