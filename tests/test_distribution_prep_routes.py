@@ -134,6 +134,7 @@ def test_prep_page_lists_worksheets(
     assert 'src="/static/htmx.min.js"' in response.text
     assert "unpkg.com/htmx" not in response.text
     assert "GitHub worksheets" in response.text
+    assert "double-sided printing" in response.text
     assert REPO in response.text
     assert "unit2" in response.text
     assert "Prepare print packet" in response.text
@@ -265,7 +266,7 @@ def test_print_packet_download(
     assert "attachment" in response.headers.get("content-disposition", "")
 
     reader = PdfReader(BytesIO(response.content))
-    assert len(reader.pages) == 2
+    assert len(reader.pages) == 4
 
 
 def _grader_header_pdf(page_count: int = 2) -> bytes:
@@ -324,6 +325,7 @@ def test_named_copies_page_lists_period_one_roster(
     assert "Period 1" in response.text
     assert "Download named copies" in response.text
     assert "install QR cover" in response.text
+    assert "double-sided" in response.text
 
 
 def test_named_copies_roster_partial(
@@ -375,14 +377,14 @@ def test_named_copies_download(
 
     document = fitz.open(stream=response.content, filetype="pdf")
     try:
-        assert document.page_count == 5
+        assert document.page_count == 6
         cover = document[0].get_text()
         assert "Install QR" in cover
         assert "Test Student A" not in cover
-        assert "Test Student A" in document[1].get_text()
         assert "Test Student A" in document[2].get_text()
-        assert "Test Student A" not in document[3].get_text()
-        assert "Student Name:" in document[3].get_text()
+        assert "Test Student A" in document[3].get_text()
+        assert "Test Student A" not in document[4].get_text()
+        assert "Student Name:" in document[4].get_text()
     finally:
         document.close()
 

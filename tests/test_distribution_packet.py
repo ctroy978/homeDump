@@ -13,6 +13,7 @@ from starlette.requests import Request
 from app import config
 import app.public_url as public_url
 from app.services.distribution_packet import (
+    DUPLEX_SPACER_NOTE,
     DistributionPacketError,
     build_distribute_url,
     build_named_class_packet_pdf,
@@ -101,7 +102,12 @@ def test_build_print_packet_pdf_merges_cover_and_worksheet() -> None:
     )
 
     reader = PdfReader(BytesIO(packet))
-    assert len(reader.pages) == 3
+    assert len(reader.pages) == 4
+    cover = reader.pages[0].extract_text() or ""
+    spacer = reader.pages[1].extract_text() or ""
+    assert "Chapter 4 Practice" in cover
+    assert "Install QR" not in spacer
+    assert DUPLEX_SPACER_NOTE in spacer
 
 
 def test_build_print_packet_pdf_rejects_encrypted_worksheet() -> None:
@@ -176,22 +182,24 @@ def test_named_class_packet_collates_names_and_blank_extra() -> None:
     )
     document = fitz.open(stream=packet, filetype="pdf")
     try:
-        assert document.page_count == 7
+        # Cover + spacer, two even-length named copies, unlabeled extra.
+        assert document.page_count == 8
         cover = document[0].get_text()
         assert "Chapter 4 Practice" in cover
         assert "Install QR" in cover
         assert "Able, Pat" not in cover
         assert "Student Name:" not in cover
-        for index in (1, 2):
+        assert DUPLEX_SPACER_NOTE in document[1].get_text()
+        for index in (2, 3):
             text = document[index].get_text()
             assert "Able, Pat" in text
             assert "Zebra, Ann" not in text
             assert "Student Name:" in text
-        for index in (3, 4):
+        for index in (4, 5):
             text = document[index].get_text()
             assert "Zebra, Ann" in text
             assert "Able, Pat" not in text
-        for index in (5, 6):
+        for index in (6, 7):
             text = document[index].get_text()
             assert "Able, Pat" not in text
             assert "Zebra, Ann" not in text
@@ -209,7 +217,7 @@ def test_named_class_packet_writes_name_in_header_slot() -> None:
     )
     document = fitz.open(stream=packet, filetype="pdf")
     try:
-        page = document[1]
+        page = document[2]
         label = page.search_for("Student Name:")[0]
         name_hits = page.search_for("Able, Pat")
         assert name_hits
@@ -248,3 +256,88 @@ def test_named_class_packet_rejects_encrypted_worksheet() -> None:
             student_names=["Able, Pat"],
             **COVER_KWARGS,
         )
+
+
+def _page_names(text: str) -> set[str]:
+    found = set()
+    for name in ("Able, Pat", "Zebra, Ann"):
+        if name in text:
+            found.add(name)
+    return found
+
+
+def test_named_class_packet_starts_each_copy_on_a_new_duplex_sheet() -> None:
+    packet = build_named_class_packet_pdf(
+        worksheet_pdf_bytes=_grader_header_pdf(page_count=1),
+        student_names=["Able, Pat", "Zebra, Ann"],
+        **COVER_KWARGS,
+    )
+    document = fitz.open(stream=packet, filetype="pdf")
+    try:
+        # Cover/spacer, Able/spacer, Zebra/spacer, extra/spacer.
+        assert document.page_count == 8
+        assert "Install QR" in document[0].get_text()
+        assert DUPLEX_SPACER_NOTE in document[1].get_text()
+        assert "Able, Pat" in document[2].get_text()
+        assert DUPLEX_SPACER_NOTE in document[3].get_text()
+        assert "Zebra, Ann" in document[4].get_text()
+        assert DUPLEX_SPACER_NOTE in document[5].get_text()
+        extra = document[6].get_text()
+        assert "Student Name:" in extra
+        assert "Able, Pat" not in extra
+        assert "Zebra, Ann" not in extra
+        assert DUPLEX_SPACER_NOTE in document[7].get_text()
+
+        for front in range(0, document.page_count, 2):
+            back = front + 1
+            names = _page_names(document[front].get_text()) | _page_names(
+                document[back].get_text()
+            )
+            assert len(names) <= 1
+            if front == 0:
+                assert not names
+    finally:
+        document.close()
+
+
+def test_named_class_packet_pads_odd_length_worksheets_between_students() -> None:
+    packet = build_named_class_packet_pdf(
+        worksheet_pdf_bytes=_grader_header_pdf(page_count=3),
+        student_names=["Able, Pat", "Zebra, Ann"],
+        **COVER_KWARGS,
+    )
+    document = fitz.open(stream=packet, filetype="pdf")
+    try:
+        # Cover/spacer + (3 pages + spacer) * 3 copies.
+        assert document.page_count == 14
+        able_pages = [index for index in range(document.page_count) if "Able, Pat" in document[index].get_text()]
+        zebra_pages = [
+            index
+            for index in range(document.page_count)
+            if "Zebra, Ann" in document[index].get_text()
+        ]
+        assert able_pages == [2, 3, 4]
+        assert zebra_pages == [6, 7, 8]
+        assert DUPLEX_SPACER_NOTE in document[5].get_text()
+        assert able_pages[0] % 2 == 0
+        assert zebra_pages[0] % 2 == 0
+    finally:
+        document.close()
+
+
+def test_print_packet_keeps_worksheet_off_the_cover_back() -> None:
+    packet = build_print_packet_pdf(
+        display_title="Chapter 4 Practice",
+        distribute_url="http://homework.local:8000/admin/distribute?repo=scope_tenth&path=unit2%2Fch04.pdf",
+        github_repo="scope_tenth",
+        github_path="unit2/ch04.pdf",
+        worksheet_pdf_bytes=_worksheet_pdf(page_count=1),
+    )
+    document = fitz.open(stream=packet, filetype="pdf")
+    try:
+        assert document.page_count == 4
+        assert "Install QR" in document[0].get_text()
+        assert DUPLEX_SPACER_NOTE in document[1].get_text()
+        assert DUPLEX_SPACER_NOTE in document[3].get_text()
+    finally:
+        document.close()
