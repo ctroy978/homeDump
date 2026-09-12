@@ -7,6 +7,7 @@ import tempfile
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -40,7 +41,12 @@ from app.services.roster_import import (
     SUPPORTED_ROSTER_EXTENSIONS,
     ingest_roster_file,
 )
-from app.services.student_roster import list_active_period_counts
+from app.services.student_roster import (
+    deactivate_student,
+    enroll_student,
+    list_active_period_counts,
+    list_active_roster,
+)
 from app.services.claim_logs import ClaimLogStatus, list_claim_logs
 from app.services.data_backup import (
     BackupError,
@@ -144,6 +150,68 @@ def _attendance_page_context(
         **summary,
     }
     return context
+
+
+def _parse_class_period(raw: str) -> int:
+    return validate_class_period(int(raw))
+
+
+def _format_other_periods(periods: list[int]) -> str:
+    if len(periods) == 1:
+        return f"period {periods[0]}"
+    if len(periods) == 2:
+        return f"periods {periods[0]} and {periods[1]}"
+    *rest, last = periods
+    return f"periods {', '.join(str(item) for item in rest)}, and {last}"
+
+
+def _other_periods_from_query(raw: str) -> list[int]:
+    periods: list[int] = []
+    seen: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+        except ValueError:
+            continue
+        if value in seen or not 0 <= value <= 7:
+            continue
+        seen.add(value)
+        periods.append(value)
+    return periods
+
+
+def _roster_redirect(period: int, **params: str) -> RedirectResponse:
+    query = urlencode({"period": str(period), **params})
+    return RedirectResponse(url=f"/admin/roster?{query}", status_code=303)
+
+
+def _roster_page_context(
+    db,
+    *,
+    selected_period: int | None = None,
+    error: str | None = None,
+    status_message: str | None = None,
+    warning_message: str | None = None,
+    form: dict[str, str] | None = None,
+) -> dict:
+    return {
+        "title": "Class roster",
+        "periods": list(range(8)),
+        "selected_period": selected_period,
+        "period_counts": list_active_period_counts(db),
+        "roster": (
+            list_active_roster(db, selected_period)
+            if selected_period is not None
+            else []
+        ),
+        "error": error,
+        "status_message": status_message,
+        "warning_message": warning_message,
+        "form": form or {"sis_number": "", "name": ""},
+    }
 
 
 def _set_admin_cookie(response: RedirectResponse) -> None:
@@ -480,6 +548,140 @@ async def upload_roster(
         name="admin/attendance.html",
         context=_attendance_page_context(db, roster_result=result),
     )
+
+
+@router.get("/roster", response_class=HTMLResponse)
+def class_roster_page(
+    request: Request,
+    period: str = "",
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+) -> HTMLResponse:
+    selected_period: int | None = None
+    error = None
+    if period.strip():
+        try:
+            selected_period = _parse_class_period(period)
+        except (TypeError, ValueError):
+            error = "Choose a class period (0–7)."
+
+    status_message = None
+    warning_message = None
+    display_name = request.query_params.get("name", "").strip()
+    if selected_period is not None and error is None:
+        who = display_name or "Student"
+        if request.query_params.get("added"):
+            status_message = f"Added {who} to period {selected_period}."
+        elif request.query_params.get("reactivated"):
+            status_message = f"{who} is back on the period {selected_period} roster."
+        elif request.query_params.get("already"):
+            status_message = f"{who} is already on the period {selected_period} roster."
+        elif request.query_params.get("removed"):
+            status_message = f"Removed {who} from period {selected_period}."
+        other = _other_periods_from_query(request.query_params.get("other", ""))
+        if other and not request.query_params.get("removed"):
+            warning_message = f"{who} is also on {_format_other_periods(other)}."
+
+    return templates.TemplateResponse(
+        request=request,
+        name="admin/roster.html",
+        context=_roster_page_context(
+            db,
+            selected_period=selected_period,
+            error=error,
+            status_message=status_message,
+            warning_message=warning_message,
+        ),
+    )
+
+
+@router.post("/roster/add")
+def add_roster_student(
+    request: Request,
+    period: str = Form(""),
+    sis_number: str = Form(""),
+    name: str = Form(""),
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+):
+    form = {"sis_number": sis_number, "name": name}
+    try:
+        selected_period = _parse_class_period(period)
+    except (TypeError, ValueError):
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/roster.html",
+            context=_roster_page_context(
+                db,
+                error="Choose a class period (0–7).",
+                form=form,
+            ),
+            status_code=400,
+        )
+
+    try:
+        result = enroll_student(db, selected_period, sis_number, name)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/roster.html",
+            context=_roster_page_context(
+                db,
+                selected_period=selected_period,
+                error=str(exc),
+                form=form,
+            ),
+            status_code=400,
+        )
+
+    params: dict[str, str] = {"name": result.student.name}
+    if result.reactivated:
+        params["reactivated"] = "1"
+    elif result.already_active:
+        params["already"] = "1"
+    else:
+        params["added"] = "1"
+    if result.other_active_periods:
+        params["other"] = ",".join(str(item) for item in result.other_active_periods)
+    return _roster_redirect(selected_period, **params)
+
+
+@router.post("/roster/{student_id}/remove")
+def remove_roster_student(
+    request: Request,
+    student_id: int,
+    period: str = Form(""),
+    _admin: None = Depends(require_admin),
+    db=Depends(get_db),
+):
+    try:
+        selected_period = _parse_class_period(period)
+    except (TypeError, ValueError):
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/roster.html",
+            context=_roster_page_context(
+                db,
+                error="Choose a class period (0–7).",
+            ),
+            status_code=400,
+        )
+
+    try:
+        student = deactivate_student(db, selected_period, student_id)
+    except ValueError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="admin/roster.html",
+            context=_roster_page_context(
+                db,
+                selected_period=selected_period,
+                error=str(exc),
+            ),
+            status_code=400,
+        )
+
+    return _roster_redirect(selected_period, removed="1", name=student.name)
 
 
 @router.get("/claims", response_class=HTMLResponse)

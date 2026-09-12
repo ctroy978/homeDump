@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+{% include "admin/_nav.html" %}
+
+<section class="card">
+  <h2>Class roster</h2>
+  <p>
+    Pick a period to see who is in that class. Add one student, or remove
+    someone who transferred out.
+  </p>
+  <p class="help-text">
+    Removing a student drops them from named copies for this period. Old
+    absences stay, so leftover makeup still works. A later
+    <a href="/admin/attendance">class roster CSV upload</a> still replaces
+    the whole period — anyone missing from that file is dropped again. An
+    attendance upload can put a student back if they appear as absent.
+  </p>
+
+  {% if error %}
+  <p class="status-note error">{{ error }}</p>
+  {% endif %}
+  {% if status_message %}
+  <p class="status-note success">{{ status_message }}</p>
+  {% endif %}
+  {% if warning_message %}
+  <p class="status-note">{{ warning_message }}</p>
+  {% endif %}
+
+  <form class="upload-form" action="/admin/roster" method="get">
+    <label for="roster-period">Class period</label>
+    <select
+      id="roster-period"
+      name="period"
+      required
+      onchange="this.form.submit()"
+    >
+      <option value="" {% if selected_period is none %}selected{% endif %} disabled>
+        Choose period…
+      </option>
+      {% for p in periods %}
+      <option value="{{ p }}" {% if selected_period == p %}selected{% endif %}>
+        Period {{ p }} ({{ period_counts[p] }} student{% if period_counts[p] != 1 %}s{% endif %})
+      </option>
+      {% endfor %}
+    </select>
+    <button type="submit">Show roster</button>
+  </form>
+</section>
+
+{% if selected_period is not none %}
+<section class="card">
+  <h2>Add a student to period {{ selected_period }}</h2>
+  <p class="help-text">
+    Student ID (Perm ID) is required. Name is a label only — two students
+    may share a name.
+  </p>
+  <form class="upload-form" action="/admin/roster/add" method="post">
+    <input type="hidden" name="period" value="{{ selected_period }}">
+    <label for="sis_number">Perm ID</label>
+    <input
+      id="sis_number"
+      name="sis_number"
+      type="text"
+      autocomplete="off"
+      required
+      value="{{ form.sis_number }}"
+    >
+    <label for="student_name">Student name</label>
+    <input
+      id="student_name"
+      name="name"
+      type="text"
+      autocomplete="off"
+      required
+      placeholder="Last, First"
+      value="{{ form.name }}"
+    >
+    <button type="submit">Add to period {{ selected_period }}</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Period {{ selected_period }} roster</h2>
+  {% if roster %}
+  <p class="help-text">
+    {{ roster|length }} student{% if roster|length != 1 %}s{% endif %} currently
+    enrolled.
+  </p>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>Student name</th>
+        <th>Perm ID</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for student in roster %}
+      <tr>
+        <td>{{ student.name }}</td>
+        <td>{{ student.sis_number or "—" }}</td>
+        <td>
+          <form
+            class="inline-delete-form"
+            method="post"
+            action="/admin/roster/{{ student.id }}/remove"
+            data-confirm="Remove {{ student.name }} from period {{ selected_period }}? They keep old absences for leftover makeup."
+            onsubmit="return confirm(this.dataset.confirm);"
+          >
+            <input type="hidden" name="period" value="{{ selected_period }}">
+            <button type="submit" class="danger-button">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="help-text">
+    No students are enrolled in period {{ selected_period }}. Add one above,
+    or <a href="/admin/attendance">upload a class roster CSV</a>.
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% endblock %}

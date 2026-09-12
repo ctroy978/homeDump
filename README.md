@@ -35,6 +35,7 @@ these URLs for yourself:
 | **Admin login** | `http://localhost:8000/admin/login` |
 | Dashboard | `http://localhost:8000/admin` |
 | Upload class roster and attendance | `http://localhost:8000/admin/attendance` |
+| Class roster (add/remove one student) | `http://localhost:8000/admin/roster` |
 | Assignments | `http://localhost:8000/admin/assignments` |
 | Print queue | `http://localhost:8000/admin/print-queue` |
 | GitHub worksheets (Phase 8) | `http://localhost:8000/admin/distribute/prep` |
@@ -58,6 +59,12 @@ columns **Perm ID** and **Student Name** (`Last, First`). Students in that file
 become the **active roster** for the period you tag. Students who disappear from
 a later roster upload of the same period are marked inactive, but keep old
 absences for leftover makeup.
+
+**Add or remove one student** on `/admin/roster`. Pick the period, then use
+the form or a Remove button. This is for transfers and typos between SIS
+exports — it does not replace a full class CSV. A later roster upload for
+that period still drops anyone missing from the file. An attendance upload
+can put a student back if they appear as absent.
 
 **Attendance export** records makeup-eligible absence dates. Exports are
 year-to-date, but you download them **one class at a time**. Imports are
